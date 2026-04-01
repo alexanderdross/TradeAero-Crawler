@@ -80,8 +80,8 @@ function mapToPartsRow(listing: ParsedPartsListing, systemUserId: string) {
     status: "active",
 
     // Optional fields
-    description: listing.description,
-    description_de: listing.description,
+    description: listing.description || listing.title,
+    description_de: listing.description || listing.title,
     price: listing.price,
     currency: config.defaultCurrency,
     price_on_request: listing.price === null,
