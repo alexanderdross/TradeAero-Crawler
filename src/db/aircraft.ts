@@ -13,6 +13,61 @@ import type { ParsedAircraftListing } from "../types.js";
  */
 let manufacturerCache: Map<string, number> | null = null;
 
+/**
+ * Well-known UL/LSA/GA manufacturer names for fuzzy title matching.
+ * These are checked against listing titles to identify the manufacturer
+ * even if they're not yet in the DB (they'll be auto-created).
+ */
+const KNOWN_MANUFACTURERS = [
+  // UL / LSA / Microlight
+  "Dynamic", "Aerospool", "Comco Ikarus", "Ikarus", "Flight Design", "Pipistrel",
+  "Tecnam", "Zlin Savage", "Savage", "AutoGyro", "Aeropilot", "Evektor",
+  "Remos", "Pioneer", "FK Lightplanes", "FK", "Roland", "ICP", "Aeropro",
+  "Eurofox", "FlySynthesis", "TL Ultralight", "DynAero", "Zenair", "Aeroprakt",
+  "BRM Aero", "Bristell", "Vampire", "Fresh Breeze", "Rans", "Air Creation",
+  "Magni", "Celier", "Blackshape", "Tomark", "Shark Aero", "Atec", "Ekolot",
+  "Czech Sport Aircraft", "Sling", "Jabiru", "Corvus", "Alpi Aviation",
+  "SD Planes", "Breezer", "JMB", "Just Aircraft", "Kitfox", "Skyranger",
+  "Scheibe", "Stemme", "DG Flugzeugbau",
+  // SEP / MEP
+  "Cessna", "Piper", "Beechcraft", "Cirrus", "Diamond", "Mooney", "Robin",
+  "Grumman", "Socata", "Daher", "Extra", "Maule", "Aviat", "CubCrafters",
+  "Bellanca", "Lake", "Commander", "Fuji", "Jodel", "Grob", "Zlin",
+  // Turboprop
+  "Pilatus", "Quest", "Piaggio", "Dornier", "ATR",
+  // Jet
+  "Eclipse", "HondaJet", "Embraer", "Bombardier", "Gulfstream", "Dassault",
+  "Learjet", "Hawker",
+  // Helicopter
+  "Robinson", "Airbus Helicopters", "Bell", "Leonardo", "MD Helicopters",
+  "Sikorsky", "Enstrom", "Guimbal", "Schweizer",
+  // Experimental / Aerobatic
+  "Vans", "Van's", "Lancair", "Glasair", "Murphy", "Sonex", "Pitts",
+  "XtremeAir", "Cap Aviation", "Yakovlev", "Sukhoi",
+  // Trike / Paramotor
+  "P&M Aviation", "Cosmos", "Airborne",
+  // Historic / Warbird
+  "North American", "De Havilland", "Stinson", "Luscombe", "Aeronca", "Taylorcraft",
+  // German UL specific
+  "Heller", "Eurostar", "Fascination", "Drachen", "Storch",
+  "Ikarus", "Comco", "Dallach", "Rotorsport", "RotorSchmiede",
+  "ELA", "Trendak", "ArrowCopter",
+];
+
+/** Unique manufacturer names from reference_specs table (cached) */
+let refSpecManufacturers: string[] | null = null;
+
+async function loadRefSpecManufacturers(): Promise<string[]> {
+  if (refSpecManufacturers) return refSpecManufacturers;
+  const { data } = await supabase
+    .from("aircraft_reference_specs")
+    .select("manufacturer");
+  const unique = [...new Set((data ?? []).map((r) => r.manufacturer as string))];
+  // Sort longest first for better matching
+  refSpecManufacturers = unique.sort((a, b) => b.length - a.length);
+  return refSpecManufacturers;
+}
+
 async function getManufacturerMap(): Promise<Map<string, number>> {
   if (manufacturerCache) return manufacturerCache;
   const { data } = await supabase.from("aircraft_manufacturers").select("id, name");
@@ -22,27 +77,98 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
 
 /**
  * Resolve manufacturer from listing title.
- * Returns { id, name } if matched, or { id: null, name: extracted } if not.
+ * 1. Check DB for existing manufacturer match
+ * 2. Check KNOWN_MANUFACTURERS list for fuzzy match
+ * 3. If found but not in DB → auto-create in aircraft_manufacturers
+ * 4. Fallback: extract first significant word and auto-create
  */
-async function resolveManufacturer(title: string): Promise<{ id: number | null; name: string }> {
+async function resolveManufacturer(title: string): Promise<{ id: number; name: string }> {
   const mfgMap = await getManufacturerMap();
-  const titleLower = title.toLowerCase();
+  const titleLower = title.replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "").toLowerCase().trim();
 
-  // Check all known manufacturers against the title
-  for (const [name, id] of mfgMap.entries()) {
-    if (titleLower.includes(name)) {
-      return { id, name: [...mfgMap.entries()].find(([, v]) => v === id)?.[0] ?? name };
+  // 1. Check existing DB manufacturers
+  for (const [nameLower, id] of mfgMap.entries()) {
+    if (titleLower.includes(nameLower)) {
+      // Get proper cased name
+      const properName = [...mfgMap.entries()].find(([k]) => k === nameLower)?.[0] ?? nameLower;
+      return { id, name: properName };
     }
   }
 
-  // Fallback: first significant word
-  const words = title.replace(/^\d{2}\.\d{2}\.\d{4}\s*/, "").split(/\s+/);
-  const firstWord = words.find((w) => w.length > 2 && !/^\d+$/.test(w) && !["update", "verkaufe", "zu"].includes(w.toLowerCase()));
-  return { id: null, name: firstWord ?? "Unknown" };
+  // 2. Check reference specs table for manufacturer match
+  const refSpecsCache = await loadRefSpecManufacturers();
+  for (const refMfg of refSpecsCache) {
+    if (titleLower.includes(refMfg.toLowerCase())) {
+      const id = await createManufacturer(refMfg);
+      return { id, name: refMfg };
+    }
+  }
+
+  // 3. Check KNOWN_MANUFACTURERS against title (longest match first)
+  const sorted = [...KNOWN_MANUFACTURERS].sort((a, b) => b.length - a.length);
+  for (const knownName of sorted) {
+    if (titleLower.includes(knownName.toLowerCase())) {
+      const id = await createManufacturer(knownName);
+      return { id, name: knownName };
+    }
+  }
+
+  // 4. Fallback: extract first significant word from title
+  const words = titleLower.split(/\s+/);
+  const skipWords = ["update", "verkaufe", "zu", "verkaufen", "wegen", "abzugeben", "neu", "neuer", "neue", "verkauf", "top", "sehr", "schöne", "schöner"];
+  const firstWord = words.find((w) => w.length > 2 && !/^\d+$/.test(w) && !skipWords.includes(w));
+
+  if (firstWord) {
+    // Capitalize first letter
+    const name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1);
+    const id = await createManufacturer(name);
+    return { id, name };
+  }
+
+  // Last resort: "Other"
+  const id = await createManufacturer("Other");
+  return { id, name: "Other" };
 }
 
 /**
- * Extract a model name from the title (everything after the manufacturer/date prefix).
+ * Create a new manufacturer in aircraft_manufacturers and update cache.
+ */
+async function createManufacturer(name: string): Promise<number> {
+  // Check cache again (might have been created by a previous listing in this run)
+  const mfgMap = await getManufacturerMap();
+  const existing = mfgMap.get(name.toLowerCase());
+  if (existing) return existing;
+
+  const { data, error } = await supabase
+    .from("aircraft_manufacturers")
+    .insert({ name })
+    .select("id")
+    .single();
+
+  if (error) {
+    // Might be a unique constraint conflict (race condition) — try to fetch
+    const { data: found } = await supabase
+      .from("aircraft_manufacturers")
+      .select("id")
+      .eq("name", name)
+      .single();
+    if (found) {
+      mfgMap.set(name.toLowerCase(), found.id);
+      return found.id;
+    }
+    logger.warn("Failed to create manufacturer", { name, error: error.message });
+    return 0; // Will show as "Unknown" but at least won't crash
+  }
+
+  // Update cache
+  mfgMap.set(name.toLowerCase(), data.id);
+  logger.info("Created new manufacturer", { name, id: data.id });
+  return data.id;
+}
+
+/**
+ * Extract a clean model name from the title.
+ * Goal: "21.11.2025 Dynamic WT-9 mit Rotax 915..." → "WT-9"
  */
 function extractModel(title: string, manufacturerName: string): string {
   // Remove date prefix like "21.11.2025 " or "Update 22.06.2025 "
@@ -50,16 +176,29 @@ function extractModel(title: string, manufacturerName: string): string {
     .replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "")
     .trim();
 
-  // If manufacturer is in the cleaned title, take the rest as model
+  // Remove manufacturer name to isolate model
   const mfgIdx = cleaned.toLowerCase().indexOf(manufacturerName.toLowerCase());
   if (mfgIdx >= 0) {
     cleaned = cleaned.slice(mfgIdx + manufacturerName.length).trim();
-    // Take first few words as model (up to a natural break like " - " or "with" or long text)
-    const modelMatch = cleaned.match(/^([^-–—]+)/);
-    if (modelMatch) return `${manufacturerName} ${modelMatch[1].trim()}`.slice(0, 100);
   }
 
-  return cleaned.slice(0, 100) || title.slice(0, 100);
+  // Take model part: up to first natural break
+  // "WT-9 mit Rotax 915 SFG..." → "WT-9"
+  // "C42 B Fluglehrer..." → "C42 B"
+  // "172 Skyhawk SP..." → "172 Skyhawk SP"
+  const breakWords = /\b(?:mit|with|zu|zum|wegen|auf|und|bei|für|von|ist|wird|Baujahr|Rotax|Motor|Betrieb|Flugstunden|verkaufe?n?|abzugeben|sell|for sale|TT|TTSN|MTOW)\b/i;
+  const parts = cleaned.split(breakWords);
+  let modelPart = (parts[0] ?? cleaned).trim();
+
+  // Clean up trailing punctuation and whitespace
+  modelPart = modelPart.replace(/[,;:\-–—]+$/, "").trim();
+
+  // Limit length
+  if (modelPart.length > 50) {
+    modelPart = modelPart.slice(0, 50).replace(/\s+\S*$/, "").trim();
+  }
+
+  return modelPart || cleaned.slice(0, 50);
 }
 
 /**
@@ -190,7 +329,7 @@ async function mapToAircraftRow(
   systemUserId: string,
   uploadedImages: Array<{ url: string; alt: string }>,
   translations: TranslationResult | null,
-  manufacturer: { id: number | null; name: string }
+  manufacturer: { id: number; name: string }
 ) {
   const localeFields = buildLocaleFields(listing.title, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
