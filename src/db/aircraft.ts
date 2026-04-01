@@ -82,52 +82,53 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
  * 3. If found but not in DB → auto-create in aircraft_manufacturers
  * 4. Fallback: extract first significant word and auto-create
  */
-async function resolveManufacturer(title: string): Promise<{ id: number; name: string }> {
+type ManufacturerMatch = { id: number; name: string; confidence: "high" | "medium" | "low" };
+
+async function resolveManufacturer(title: string): Promise<ManufacturerMatch> {
   const mfgMap = await getManufacturerMap();
   const titleLower = title.replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "").toLowerCase().trim();
 
-  // 1. Check existing DB manufacturers
+  // 1. Check existing DB manufacturers → HIGH confidence
   for (const [nameLower, id] of mfgMap.entries()) {
     if (titleLower.includes(nameLower)) {
-      // Get proper cased name
       const properName = [...mfgMap.entries()].find(([k]) => k === nameLower)?.[0] ?? nameLower;
-      return { id, name: properName };
+      return { id, name: properName, confidence: "high" };
     }
   }
 
-  // 2. Check reference specs table for manufacturer match
+  // 2. Check reference specs table → HIGH confidence
   const refSpecsCache = await loadRefSpecManufacturers();
   for (const refMfg of refSpecsCache) {
     if (titleLower.includes(refMfg.toLowerCase())) {
       const id = await createManufacturer(refMfg);
-      return { id, name: refMfg };
+      return { id, name: refMfg, confidence: "high" };
     }
   }
 
-  // 3. Check KNOWN_MANUFACTURERS against title (longest match first)
+  // 3. Check KNOWN_MANUFACTURERS list → MEDIUM confidence
   const sorted = [...KNOWN_MANUFACTURERS].sort((a, b) => b.length - a.length);
   for (const knownName of sorted) {
     if (titleLower.includes(knownName.toLowerCase())) {
       const id = await createManufacturer(knownName);
-      return { id, name: knownName };
+      return { id, name: knownName, confidence: "medium" };
     }
   }
 
-  // 4. Fallback: extract first significant word from title
+  // 4. Fallback: extract from title → LOW confidence (needs admin review)
   const words = titleLower.split(/\s+/);
   const skipWords = ["update", "verkaufe", "zu", "verkaufen", "wegen", "abzugeben", "neu", "neuer", "neue", "verkauf", "top", "sehr", "schöne", "schöner"];
   const firstWord = words.find((w) => w.length > 2 && !/^\d+$/.test(w) && !skipWords.includes(w));
 
   if (firstWord) {
-    // Capitalize first letter
     const name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1);
     const id = await createManufacturer(name);
-    return { id, name };
+    logger.warn("Low-confidence manufacturer extraction — listing saved as draft", { title: title.slice(0, 80), manufacturer: name });
+    return { id, name, confidence: "low" };
   }
 
-  // Last resort: "Other"
   const id = await createManufacturer("Other");
-  return { id, name: "Other" };
+  logger.warn("Could not resolve manufacturer — listing saved as draft", { title: title.slice(0, 80) });
+  return { id, name: "Other", confidence: "low" };
 }
 
 /**
@@ -321,6 +322,12 @@ export async function upsertAircraftListing(
     return "skipped";
   }
   logger.debug("Inserted aircraft listing", { sourceId: listing.sourceId });
+
+  // Log draft listings for admin review
+  if (manufacturer.confidence === "low") {
+    await logDraftForReview(listing.title, listing.sourceId, manufacturer.name);
+  }
+
   return "inserted";
 }
 
@@ -329,7 +336,7 @@ async function mapToAircraftRow(
   systemUserId: string,
   uploadedImages: Array<{ url: string; alt: string }>,
   translations: TranslationResult | null,
-  manufacturer: { id: number; name: string }
+  manufacturer: ManufacturerMatch
 ) {
   const localeFields = buildLocaleFields(listing.title, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
@@ -390,8 +397,9 @@ async function mapToAircraftRow(
     source_url: listing.sourceId,
     is_external: true,
 
-    status: "active",
-    country: "Germany", // Full English name, not ISO code
+    // Low-confidence manufacturer → draft (needs admin review before publishing)
+    status: manufacturer.confidence === "low" ? "draft" : "active",
+    country: "Germany",
 
     // Specs
     total_time: listing.totalTime,
@@ -437,4 +445,25 @@ function buildLocaleFields(
 function isValidIsoDate(value: string | null | undefined): boolean {
   if (!value) return false;
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !isNaN(Date.parse(value));
+}
+
+/**
+ * Log a draft listing to admin_activity_logs for review.
+ * Admin dashboard shows these under the Activity tab.
+ */
+async function logDraftForReview(title: string, sourceId: string, guessedManufacturer: string): Promise<void> {
+  try {
+    await supabase.from("admin_activity_logs").insert({
+      action: "Crawler: listing saved as draft — unknown manufacturer",
+      target_type: "listing",
+      target_name: title.slice(0, 200),
+      metadata: {
+        source_id: sourceId,
+        guessed_manufacturer: guessedManufacturer,
+        reason: "Manufacturer not found in DB, reference specs, or known list. Needs manual review.",
+      },
+    });
+  } catch {
+    // Non-critical — don't fail the crawl for logging issues
+  }
 }
