@@ -3,7 +3,8 @@ import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { uploadImages } from "../utils/images.js";
 import { translateListing, type TranslationResult } from "../utils/translate.js";
-import { generateSlug, generateLocalizedSlugs } from "../utils/slug.js";
+import { generateSlug } from "../utils/slug.js";
+import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import type { ParsedPartsListing } from "../types.js";
 
 /**
@@ -136,8 +137,8 @@ function mapToPartsRow(
     source_url: listing.sourceId,
     is_external: true,
 
-    // Images — uploaded to Supabase Storage
-    images: uploadedImages,
+    // Images — enriched with per-locale alt text
+    images: enrichImagesWithLocalizedAlt(uploadedImages, listing.title, translations),
 
     // Translation handled by crawler
     auto_translate: false,
@@ -148,32 +149,28 @@ function mapToPartsRow(
   };
 }
 
-const LANGS = ["en", "de", "fr", "es", "it", "pl", "cs", "sv", "nl", "pt", "ru", "tr", "el", "no"] as const;
 
-function buildLocaleFields(
-  headline: string,
-  description: string,
+/** Enrich images with per-locale alt text from translations */
+function enrichImagesWithLocalizedAlt(
+  images: Array<{ url: string; alt_text: string }>,
+  defaultAlt: string,
   translations: TranslationResult | null
-): Record<string, string> {
-  const fields: Record<string, string> = {};
-  const slugSource: Record<string, { headline: string }> = {};
-
-  for (const lang of LANGS) {
-    const t = translations?.[lang];
-    const h = t?.headline ?? headline;
-    const d = t?.description ?? description;
-
-    fields[`headline_${lang}`] = h;
-    fields[`description_${lang}`] = d;
-    slugSource[lang] = { headline: h };
-  }
-
-  const slugs = generateLocalizedSlugs(slugSource);
-  for (const lang of LANGS) {
-    fields[`slug_${lang}`] = slugs[lang];
-  }
-
-  return fields;
+): Array<Record<string, unknown>> {
+  return images.map((img, idx) => {
+    const enriched: Record<string, unknown> = {
+      url: img.url,
+      alt_text: img.alt_text || defaultAlt,
+      auto_translate: false,
+      sort_order: idx,
+    };
+    for (const lang of LANGS) {
+      const t = translations?.[lang];
+      enriched[`alt_text_${lang}`] = t?.headline
+        ? `${t.headline} - Image ${idx + 1}`
+        : `${defaultAlt} - Image ${idx + 1}`;
+    }
+    return enriched;
+  });
 }
 
 /** Best-effort manufacturer extraction from title */
