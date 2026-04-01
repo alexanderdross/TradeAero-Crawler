@@ -3,7 +3,6 @@ import { supabase } from "../db/client.js";
 import { config } from "../config.js";
 import { logger } from "./logger.js";
 
-const BUCKET = "aircraft-images";
 const MAX_CONCURRENT = 3;
 
 /**
@@ -11,13 +10,14 @@ const MAX_CONCURRENT = 3;
  * Returns an array of {url, alt} objects with Supabase public URLs.
  *
  * Matches the existing TradeAero pattern:
- *   Bucket: "aircraft-images"
+ *   Bucket: "aircraft-images" or "parts-images"
  *   Path: "listings/{uuid}.jpg"
- *   URL: https://<project>.supabase.co/storage/v1/object/public/aircraft-images/listings/{uuid}.jpg
+ *   URL: https://<project>.supabase.co/storage/v1/object/public/{bucket}/listings/{uuid}.jpg
  */
 export async function uploadImages(
   imageUrls: string[],
-  altText: string
+  altText: string,
+  bucket: string = "aircraft-images"
 ): Promise<Array<{ url: string; alt: string }>> {
   if (imageUrls.length === 0) return [];
 
@@ -27,7 +27,7 @@ export async function uploadImages(
   for (let i = 0; i < imageUrls.length; i += MAX_CONCURRENT) {
     const batch = imageUrls.slice(i, i + MAX_CONCURRENT);
     const batchResults = await Promise.allSettled(
-      batch.map((url) => downloadAndUpload(url, altText))
+      batch.map((url) => downloadAndUpload(url, altText, bucket))
     );
 
     for (const result of batchResults) {
@@ -42,7 +42,8 @@ export async function uploadImages(
 
 async function downloadAndUpload(
   sourceUrl: string,
-  altText: string
+  altText: string,
+  bucket: string
 ): Promise<{ url: string; alt: string } | null> {
   try {
     // Download the image
@@ -74,7 +75,7 @@ async function downloadAndUpload(
 
     // Upload to Supabase Storage
     const { error } = await supabase.storage
-      .from(BUCKET)
+      .from(bucket)
       .upload(filePath, buffer, {
         contentType: mimeType,
         upsert: false,
@@ -87,7 +88,7 @@ async function downloadAndUpload(
 
     // Get public URL
     const { data: publicData } = supabase.storage
-      .from(BUCKET)
+      .from(bucket)
       .getPublicUrl(filePath);
 
     logger.debug("Uploaded image", { sourceUrl, storagePath: filePath });

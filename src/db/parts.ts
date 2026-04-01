@@ -35,7 +35,7 @@ export async function upsertPartsListing(
   // Upload images to Supabase Storage (only for new listings)
   const images = existing
     ? []
-    : await uploadImages(listing.imageUrls, listing.title);
+    : await uploadImages(listing.imageUrls, listing.title, "parts-images");
 
   const record = mapToPartsRow(listing, systemUserId, images);
 
