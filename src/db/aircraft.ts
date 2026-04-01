@@ -16,10 +16,6 @@ export async function upsertAircraftListing(
   systemUserId: string
 ): Promise<"inserted" | "updated" | "skipped"> {
   // Validate required fields that have DB CHECK constraints
-  if (!listing.price || listing.price <= 0) {
-    logger.debug("Skipping listing: no valid price", { sourceId: listing.sourceId });
-    return "skipped";
-  }
   if (!listing.year || listing.year < 1900 || listing.year > new Date().getFullYear() + 1) {
     logger.debug("Skipping listing: no valid year", { sourceId: listing.sourceId, year: listing.year });
     return "skipped";
@@ -98,9 +94,9 @@ function mapToAircraftRow(
     registration: "N/A",
     serial_number: "N/A",
     location: listing.location ?? "Deutschland",
-    price: listing.price!,
+    price: listing.price && listing.price > 0 ? listing.price : null,
     currency: config.defaultCurrency,
-    price_negotiable: listing.priceNegotiable,
+    price_negotiable: !listing.price || listing.price <= 0 ? true : listing.priceNegotiable,
     description: listing.description,
     contact_name: listing.contactName ?? "Siehe Originalanzeige",
     contact_email: listing.contactEmail ?? "noreply@trade.aero",
