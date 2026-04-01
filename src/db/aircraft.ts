@@ -1,6 +1,7 @@
 import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
+import { uploadImages } from "../utils/images.js";
 import type { ParsedAircraftListing } from "../types.js";
 
 /**
@@ -41,13 +42,19 @@ export async function upsertAircraftListing(
     .eq("source_url", listing.sourceId)
     .maybeSingle();
 
-  const record = mapToAircraftRow(listing, systemUserId);
+  // Upload images to Supabase Storage (only for new listings)
+  const images = existing
+    ? [] // Skip re-uploading for updates
+    : await uploadImages(listing.imageUrls, listing.title);
+
+  const record = mapToAircraftRow(listing, systemUserId, images);
 
   if (existing) {
-    // Update existing record
+    // Update existing record (keep existing images)
+    const { images: _skipImages, ...updateRecord } = record;
     const { error } = await supabase
       .from("aircraft_listings")
-      .update({ ...record, updated_at: new Date().toISOString() })
+      .update({ ...updateRecord, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
 
     if (error) {
@@ -77,7 +84,11 @@ export async function upsertAircraftListing(
   return "inserted";
 }
 
-function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) {
+function mapToAircraftRow(
+  listing: ParsedAircraftListing,
+  systemUserId: string,
+  uploadedImages: Array<{ url: string; alt: string }>
+) {
   return {
     // Required fields (validated before this point)
     headline: listing.title,
@@ -115,11 +126,8 @@ function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) 
     // Only set if it's a valid ISO date (YYYY-MM-DD)
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
 
-    // Images as JSONB array [{url, alt}]
-    images: listing.imageUrls.map((url) => ({
-      url,
-      alt: listing.title,
-    })),
+    // Images as JSONB array [{url, alt}] — uploaded to Supabase Storage
+    images: uploadedImages,
 
     // Auto-translate disabled for scraped content (already in German)
     auto_translate: false,

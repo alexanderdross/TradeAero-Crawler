@@ -1,6 +1,7 @@
 import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
+import { uploadImages } from "../utils/images.js";
 import type { ParsedPartsListing } from "../types.js";
 
 /**
@@ -31,12 +32,18 @@ export async function upsertPartsListing(
     .eq("source_url", listing.sourceId)
     .maybeSingle();
 
-  const record = mapToPartsRow(listing, systemUserId);
+  // Upload images to Supabase Storage (only for new listings)
+  const images = existing
+    ? []
+    : await uploadImages(listing.imageUrls, listing.title);
+
+  const record = mapToPartsRow(listing, systemUserId, images);
 
   if (existing) {
+    const { images: _skipImages, ...updateRecord } = record;
     const { error } = await supabase
       .from("parts_listings")
-      .update({ ...record, updated_at: new Date().toISOString() })
+      .update({ ...updateRecord, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
 
     if (error) {
@@ -65,7 +72,11 @@ export async function upsertPartsListing(
   return "inserted";
 }
 
-function mapToPartsRow(listing: ParsedPartsListing, systemUserId: string) {
+function mapToPartsRow(
+  listing: ParsedPartsListing,
+  systemUserId: string,
+  uploadedImages: Array<{ url: string; alt: string }>
+) {
   return {
     // Required fields
     user_id: systemUserId,
@@ -94,11 +105,8 @@ function mapToPartsRow(listing: ParsedPartsListing, systemUserId: string) {
     source_url: listing.sourceId,
     is_external: true,
 
-    // Images
-    images: listing.imageUrls.map((url) => ({
-      url,
-      alt: listing.title,
-    })),
+    // Images — uploaded to Supabase Storage
+    images: uploadedImages,
 
     // Auto-translate disabled
     auto_translate: false,
