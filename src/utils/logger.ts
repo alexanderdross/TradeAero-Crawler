@@ -1,6 +1,20 @@
-/** Lightweight structured logger for crawler observability (Epic 4.2) */
+/** Lightweight structured logger with LOG_LEVEL support */
 
-type LogLevel = "info" | "warn" | "error" | "debug";
+type LogLevel = "debug" | "info" | "warn" | "error";
+
+const LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+/** Read LOG_LEVEL from env: debug, info (default), warn, error */
+const currentLevel: LogLevel = (() => {
+  const env = (process.env.LOG_LEVEL ?? "info").toLowerCase();
+  if (env in LEVEL_PRIORITY) return env as LogLevel;
+  return "info";
+})();
 
 interface LogEntry {
   timestamp: string;
@@ -15,6 +29,8 @@ function formatEntry(entry: LogEntry): string {
 }
 
 function log(level: LogLevel, message: string, context?: Record<string, unknown>): void {
+  if (LEVEL_PRIORITY[level] < LEVEL_PRIORITY[currentLevel]) return;
+
   const entry: LogEntry = {
     timestamp: new Date().toISOString(),
     level,

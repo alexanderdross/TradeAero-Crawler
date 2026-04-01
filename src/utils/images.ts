@@ -3,27 +3,54 @@ import { supabase } from "../db/client.js";
 import { logger } from "./logger.js";
 import { fetchBinary } from "./fetch.js";
 
-const MAX_CONCURRENT = 3;
+const MAX_CONCURRENT = 5;
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+/** Allowed image source domains — SSRF prevention (CWE-918) */
+const ALLOWED_IMAGE_DOMAINS = [
+  "www.helmuts-ul-seiten.de",
+  "helmuts-ul-seiten.de",
+  "www.aircraft24.de",
+  "aircraft24.de",
+  "www.aeromarkt.net",
+  "aeromarkt.net",
+];
+
+/** JPEG magic bytes: FF D8 FF */
+const JPEG_MAGIC = [0xff, 0xd8, 0xff];
+/** PNG magic bytes: 89 50 4E 47 */
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
+
+function isValidImage(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  return (
+    JPEG_MAGIC.every((b, i) => buffer[i] === b) ||
+    PNG_MAGIC.every((b, i) => buffer[i] === b)
+  );
+}
+
+function isAllowedDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return ALLOWED_IMAGE_DOMAINS.includes(hostname);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Download images from external URLs and upload them to Supabase Storage.
- * Returns an array of {url, alt} objects with Supabase public URLs.
- *
- * Matches the existing TradeAero pattern:
- *   Bucket: "aircraft-images" or "parts-images"
- *   Path: "listings/{uuid}.jpg"
- *   URL: https://<project>.supabase.co/storage/v1/object/public/{bucket}/listings/{uuid}.jpg
+ * Returns array of {url, alt_text} matching the refactor app's ImageWithMeta format.
  */
 export async function uploadImages(
   imageUrls: string[],
   altText: string,
   bucket: string = "aircraft-images"
-): Promise<Array<{ url: string; alt: string }>> {
+): Promise<Array<{ url: string; alt_text: string }>> {
   if (imageUrls.length === 0) return [];
 
-  const results: Array<{ url: string; alt: string }> = [];
+  const results: Array<{ url: string; alt_text: string }> = [];
 
-  // Process in batches to limit concurrency
   for (let i = 0; i < imageUrls.length; i += MAX_CONCURRENT) {
     const batch = imageUrls.slice(i, i + MAX_CONCURRENT);
     const batchResults = await Promise.allSettled(
@@ -33,6 +60,8 @@ export async function uploadImages(
     for (const result of batchResults) {
       if (result.status === "fulfilled" && result.value) {
         results.push(result.value);
+      } else if (result.status === "rejected") {
+        logger.warn("Image batch item failed", { reason: String(result.reason) });
       }
     }
   }
@@ -44,9 +73,14 @@ async function downloadAndUpload(
   sourceUrl: string,
   altText: string,
   bucket: string
-): Promise<{ url: string; alt: string } | null> {
+): Promise<{ url: string; alt_text: string } | null> {
   try {
-    // Download the image (uses proxy if configured)
+    // SSRF prevention: only allow known source domains (CWE-918)
+    if (!isAllowedDomain(sourceUrl)) {
+      logger.warn("Blocked image from non-allowed domain", { sourceUrl });
+      return null;
+    }
+
     const result = await fetchBinary(sourceUrl);
     if (!result) {
       logger.warn("Failed to download image", { sourceUrl });
@@ -55,13 +89,23 @@ async function downloadAndUpload(
 
     const { buffer, contentType } = result;
 
-    // Determine extension: keep png as png, everything else as jpg
+    // Size limit — prevent memory exhaustion (CWE-400)
+    if (buffer.length > MAX_IMAGE_SIZE) {
+      logger.warn("Image exceeds size limit", { sourceUrl, size: buffer.length });
+      return null;
+    }
+
+    // Magic byte validation — prevent malicious file uploads (CWE-434)
+    if (!isValidImage(buffer)) {
+      logger.warn("Invalid image magic bytes — not JPEG or PNG", { sourceUrl });
+      return null;
+    }
+
     const ext = contentType.includes("png") ? "png" : "jpg";
     const mimeType = ext === "png" ? "image/png" : "image/jpeg";
     const fileName = `${randomUUID()}.${ext}`;
     const filePath = `listings/${fileName}`;
 
-    // Upload to Supabase Storage
     const { error } = await supabase.storage
       .from(bucket)
       .upload(filePath, buffer, {
@@ -74,13 +118,13 @@ async function downloadAndUpload(
       return null;
     }
 
-    // Get public URL
     const { data: publicData } = supabase.storage
       .from(bucket)
       .getPublicUrl(filePath);
 
     logger.debug("Uploaded image", { sourceUrl, storagePath: filePath });
-    return { url: publicData.publicUrl, alt: altText };
+    // Use alt_text key to match refactor app's ImageWithMeta normalizer
+    return { url: publicData.publicUrl, alt_text: altText };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn("Image download/upload error", { sourceUrl, error: msg });

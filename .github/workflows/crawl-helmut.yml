@@ -46,4 +46,4 @@ jobs:
           CRAWLER_SYSTEM_USER_ID: ${{ secrets.CRAWLER_SYSTEM_USER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CRAWL_DELAY_MS: "2000"
-        run: node dist/index.js --source helmut --target ${{ github.event.inputs.target || 'all' }}
+        run: node dist/index.js --source helmut --target "${{ github.event.inputs.target || 'all' }}"

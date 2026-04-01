@@ -274,11 +274,16 @@ export async function upsertAircraftListing(
     listing.description = listing.title;
   }
 
-  const { data: existing } = await supabase
+  const { data: existing, error: lookupError } = await supabase
     .from("aircraft_listings")
     .select("id, updated_at, images")
     .eq("source_url", listing.sourceId)
     .maybeSingle();
+
+  if (lookupError) {
+    logger.error("Dedup lookup failed", { sourceId: listing.sourceId, error: lookupError.message });
+    return "skipped";
+  }
 
   // Resolve manufacturer (needed for both paths)
   const manufacturer = await resolveManufacturer(listing.title);
@@ -291,7 +296,7 @@ export async function upsertAircraftListing(
     const hasExternalImages = existingImages.length > 0 && existingImages.some(
       (img) => img.url && !img.url.includes("supabase.co")
     );
-    let freshImages: Array<{ url: string; alt: string }> = [];
+    let freshImages: Array<{ url: string; alt_text: string }> = [];
     if (hasExternalImages && listing.imageUrls.length > 0) {
       freshImages = await uploadImages(listing.imageUrls, listing.title);
       if (freshImages.length > 0) {
@@ -392,7 +397,7 @@ export async function upsertAircraftListing(
 async function mapToAircraftRow(
   listing: ParsedAircraftListing,
   systemUserId: string,
-  uploadedImages: Array<{ url: string; alt: string }>,
+  uploadedImages: Array<{ url: string; alt_text: string }>,
   translations: TranslationResult | null,
   manufacturer: ManufacturerMatch
 ) {

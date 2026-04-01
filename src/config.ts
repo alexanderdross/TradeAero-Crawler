@@ -79,4 +79,7 @@ export function validateConfig(): void {
   if (!config.supabase.serviceRoleKey) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is required");
   }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn("[CONFIG] WARNING: ANTHROPIC_API_KEY is not set — translations will be skipped, all locales will use German text");
+  }
 }

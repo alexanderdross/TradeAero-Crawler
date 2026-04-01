@@ -26,11 +26,16 @@ export async function upsertPartsListing(
   listing: ParsedPartsListing,
   systemUserId: string
 ): Promise<"inserted" | "updated" | "skipped"> {
-  const { data: existing } = await supabase
+  const { data: existing, error: lookupError } = await supabase
     .from("parts_listings")
     .select("id, updated_at, images")
     .eq("source_url", listing.sourceId)
     .maybeSingle();
+
+  if (lookupError) {
+    logger.error("Dedup lookup failed", { sourceId: listing.sourceId, error: lookupError.message });
+    return "skipped";
+  }
 
   // Ensure description is never empty
   const desc = listing.description?.trim() || listing.title;
@@ -41,7 +46,7 @@ export async function upsertPartsListing(
     const hasExternalImages = existingImages.length > 0 && existingImages.some(
       (img) => img.url && !img.url.includes("supabase.co")
     );
-    let freshImages: Array<{ url: string; alt: string }> = [];
+    let freshImages: Array<{ url: string; alt_text: string }> = [];
     if (hasExternalImages && listing.imageUrls.length > 0) {
       freshImages = await uploadImages(listing.imageUrls, listing.title, "parts-images");
     }
@@ -93,7 +98,7 @@ export async function upsertPartsListing(
 function mapToPartsRow(
   listing: ParsedPartsListing,
   systemUserId: string,
-  uploadedImages: Array<{ url: string; alt: string }>,
+  uploadedImages: Array<{ url: string; alt_text: string }>,
   translations: TranslationResult | null
 ) {
   const desc = listing.description || listing.title;

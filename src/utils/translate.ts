@@ -103,17 +103,35 @@ Return a JSON object with this exact structure:
     >;
 
     // Build full result including source language
+    // Validate completeness: ensure all 14 locales are populated
     const result: Partial<TranslationResult> = {};
     result[sourceLang] = { headline, description };
+    const missingLangs: string[] = [];
     for (const lang of targetLangs) {
-      if (translations[lang]) {
-        result[lang] = translations[lang];
+      if (translations[lang]?.headline && translations[lang]?.description) {
+        // Sanitize translated text (strip any HTML tags from LLM output)
+        result[lang] = {
+          headline: translations[lang].headline.replace(/<[^>]*>/g, "").trim(),
+          description: translations[lang].description.replace(/<[^>]*>/g, "").trim(),
+        };
+      } else {
+        // Fallback to source language text for missing locales
+        missingLangs.push(lang);
+        result[lang] = { headline, description };
       }
+    }
+
+    if (missingLangs.length > 0) {
+      logger.warn("Translation incomplete — some locales fell back to source", {
+        missing: missingLangs,
+        headline: headline.slice(0, 50),
+      });
     }
 
     logger.debug("Translated listing", {
       headline: headline.slice(0, 50),
       languages: Object.keys(result).length,
+      missing: missingLangs.length,
     });
 
     return result as TranslationResult;
