@@ -46,5 +46,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CRAWLER_SYSTEM_USER_ID: ${{ secrets.CRAWLER_SYSTEM_USER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CRAWL_DELAY_MS: "2000"
         run: node dist/index.js --target ${{ github.event.inputs.target || 'all' }}

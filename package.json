@@ -14,13 +14,20 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": ["aviation", "crawler", "scraper", "tradeaero", "ultralight"],
+  "keywords": [
+    "aviation",
+    "crawler",
+    "scraper",
+    "tradeaero",
+    "ultralight"
+  ],
   "license": "UNLICENSED",
   "private": true,
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.81.0",
     "@supabase/supabase-js": "^2.49.1",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.7"

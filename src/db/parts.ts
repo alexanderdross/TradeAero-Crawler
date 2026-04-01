@@ -2,12 +2,13 @@ import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
 import { uploadImages } from "../utils/images.js";
+import { translateListing, type TranslationResult } from "../utils/translate.js";
+import { generateSlug, generateLocalizedSlugs } from "../utils/slug.js";
 import type { ParsedPartsListing } from "../types.js";
 
 /**
  * Category name → parts_categories.id mapping.
  * These IDs must match the existing reference data in Supabase.
- * TODO: Fetch dynamically on startup instead of hardcoding.
  */
 const CATEGORY_MAP: Record<string, number> = {
   avionics: 1,
@@ -19,8 +20,7 @@ const CATEGORY_MAP: Record<string, number> = {
 /**
  * Upsert a parsed parts listing into the Supabase `parts_listings` table.
  *
- * Required NOT NULL columns: user_id, headline, category_id, manufacturer,
- *   country, contact_name, contact_email, status
+ * Flow: check dedup → upload images → translate → insert/update
  */
 export async function upsertPartsListing(
   listing: ParsedPartsListing,
@@ -37,7 +37,11 @@ export async function upsertPartsListing(
     ? []
     : await uploadImages(listing.imageUrls, listing.title, "parts-images");
 
-  const record = mapToPartsRow(listing, systemUserId, images);
+  // Translate headline + description into all 14 locales
+  const desc = listing.description || listing.title;
+  const translations = await translateListing(listing.title, desc, "de");
+
+  const record = mapToPartsRow(listing, systemUserId, images, translations);
 
   if (existing) {
     const { images: _skipImages, ...updateRecord } = record;
@@ -75,13 +79,16 @@ export async function upsertPartsListing(
 function mapToPartsRow(
   listing: ParsedPartsListing,
   systemUserId: string,
-  uploadedImages: Array<{ url: string; alt: string }>
+  uploadedImages: Array<{ url: string; alt: string }>,
+  translations: TranslationResult | null
 ) {
+  const desc = listing.description || listing.title;
+  const localeFields = buildLocaleFields(listing.title, desc, translations);
+
   return {
     // Required fields
     user_id: systemUserId,
     headline: listing.title,
-    headline_de: listing.title,
     category_id: CATEGORY_MAP[listing.category] ?? CATEGORY_MAP.miscellaneous,
     manufacturer: extractManufacturer(listing.title),
     country: config.defaultCountry,
@@ -90,15 +97,20 @@ function mapToPartsRow(
     contact_phone: listing.contactPhone ?? "",
     status: "active",
 
+    // All 14 locale columns
+    ...localeFields,
+
+    // Base fields
+    description: desc,
+    slug: generateSlug(listing.title),
+
     // Optional fields
-    description: listing.description || listing.title,
-    description_de: listing.description || listing.title,
     price: listing.price,
     currency: config.defaultCurrency,
     price_on_request: listing.price === null,
     accepts_offers: listing.priceNegotiable,
     total_time: listing.totalTime,
-    condition_code: "AR", // As-Removed: safe default for used parts
+    condition_code: "AR",
 
     // Origin tracking (Epic 3)
     source_name: listing.sourceName,
@@ -108,7 +120,7 @@ function mapToPartsRow(
     // Images — uploaded to Supabase Storage
     images: uploadedImages,
 
-    // Auto-translate disabled
+    // Translation handled by crawler
     auto_translate: false,
     headline_auto_translate: false,
 
@@ -117,7 +129,35 @@ function mapToPartsRow(
   };
 }
 
-/** Best-effort manufacturer extraction from title (first word or known brand) */
+const LANGS = ["en", "de", "fr", "es", "it", "pl", "cs", "sv", "nl", "pt", "ru", "tr", "el", "no"] as const;
+
+function buildLocaleFields(
+  headline: string,
+  description: string,
+  translations: TranslationResult | null
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+  const slugSource: Record<string, { headline: string }> = {};
+
+  for (const lang of LANGS) {
+    const t = translations?.[lang];
+    const h = t?.headline ?? headline;
+    const d = t?.description ?? description;
+
+    fields[`headline_${lang}`] = h;
+    fields[`description_${lang}`] = d;
+    slugSource[lang] = { headline: h };
+  }
+
+  const slugs = generateLocalizedSlugs(slugSource);
+  for (const lang of LANGS) {
+    fields[`slug_${lang}`] = slugs[lang];
+  }
+
+  return fields;
+}
+
+/** Best-effort manufacturer extraction from title */
 function extractManufacturer(title: string): string {
   const knownBrands = [
     "Rotax", "BRP", "Garmin", "Becker", "Junkers", "Trig", "Funkwerk",
@@ -133,6 +173,5 @@ function extractManufacturer(title: string): string {
     }
   }
 
-  // Fallback: first word
   return title.split(/\s+/)[0] ?? "Unbekannt";
 }
