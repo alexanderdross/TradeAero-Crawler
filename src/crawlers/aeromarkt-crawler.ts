@@ -5,7 +5,8 @@ import { startCrawlRun, completeCrawlRun, failCrawlRun } from "../db/crawler-run
 import { getSystemUserId } from "../db/system-user.js";
 import { parseAeromarktAircraftPage, parseAeromarktPartsPage } from "../parsers/aeromarkt.js";
 import type { CrawlResult } from "../types.js";
-import { delay, fetchPage } from "../utils/fetch.js";
+import { delay, fetchPage, getProxyBytesTransferred, resetProxyBytesTransferred } from "../utils/fetch.js";
+import { getTranslationTokenUsage, resetTranslationTokenUsage } from "../utils/translate.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -39,6 +40,8 @@ async function crawlAeromarktAircraft(): Promise<CrawlResult> {
   let listingsSkipped = 0;
 
   const dbRunId = await startCrawlRun(src.name, "aircraft");
+  resetProxyBytesTransferred();
+  resetTranslationTokenUsage();
   logger.info("Starting aeromarkt.net aircraft crawl", { dbRunId });
 
   try {
@@ -79,10 +82,13 @@ async function crawlAeromarktAircraft(): Promise<CrawlResult> {
     }
 
     if (dbRunId) {
+      const tokens = getTranslationTokenUsage();
       await completeCrawlRun(dbRunId, {
         pagesProcessed, listingsFound, listingsInserted,
         listingsUpdated, listingsSkipped, errors: errors.length,
         imagesUploaded: listingsInserted, translationsCompleted: listingsInserted + listingsUpdated,
+        proxyBytesTransferred: getProxyBytesTransferred(),
+        translationInputTokens: tokens.input, translationOutputTokens: tokens.output,
       }, startTime);
     }
   } catch (err) {
@@ -108,6 +114,8 @@ async function crawlAeromarktParts(): Promise<CrawlResult> {
   let listingsSkipped = 0;
 
   const dbRunId = await startCrawlRun(src.name, "parts");
+  resetProxyBytesTransferred();
+  resetTranslationTokenUsage();
   logger.info("Starting aeromarkt.net parts crawl", { dbRunId });
 
   try {
@@ -148,10 +156,13 @@ async function crawlAeromarktParts(): Promise<CrawlResult> {
     }
 
     if (dbRunId) {
+      const tokens = getTranslationTokenUsage();
       await completeCrawlRun(dbRunId, {
         pagesProcessed, listingsFound, listingsInserted,
         listingsUpdated, listingsSkipped, errors: errors.length,
         imagesUploaded: listingsInserted, translationsCompleted: listingsInserted + listingsUpdated,
+        proxyBytesTransferred: getProxyBytesTransferred(),
+        translationInputTokens: tokens.input, translationOutputTokens: tokens.output,
       }, startTime);
     }
   } catch (err) {

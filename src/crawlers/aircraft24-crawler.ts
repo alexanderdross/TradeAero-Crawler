@@ -4,7 +4,8 @@ import { startCrawlRun, completeCrawlRun, failCrawlRun } from "../db/crawler-run
 import { getSystemUserId } from "../db/system-user.js";
 import { parseAircraft24IndexPage, parseAircraft24ModelPage } from "../parsers/aircraft24.js";
 import type { CrawlResult } from "../types.js";
-import { delay, fetchPage } from "../utils/fetch.js";
+import { delay, fetchPage, getProxyBytesTransferred, resetProxyBytesTransferred } from "../utils/fetch.js";
+import { getTranslationTokenUsage, resetTranslationTokenUsage } from "../utils/translate.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -39,6 +40,8 @@ async function crawlAircraft24Aircraft(): Promise<CrawlResult> {
   let listingsSkipped = 0;
 
   const dbRunId = await startCrawlRun(src.name, "aircraft");
+  resetProxyBytesTransferred();
+  resetTranslationTokenUsage();
   logger.info("Starting aircraft24.de crawl", { dbRunId });
 
   try {
@@ -110,10 +113,13 @@ async function crawlAircraft24Aircraft(): Promise<CrawlResult> {
     }
 
     if (dbRunId) {
+      const tokens = getTranslationTokenUsage();
       await completeCrawlRun(dbRunId, {
         pagesProcessed, listingsFound, listingsInserted,
         listingsUpdated, listingsSkipped, errors: errors.length,
         imagesUploaded: listingsInserted, translationsCompleted: listingsInserted + listingsUpdated,
+        proxyBytesTransferred: getProxyBytesTransferred(),
+        translationInputTokens: tokens.input, translationOutputTokens: tokens.output,
       }, startTime);
     }
   } catch (err) {

@@ -10,6 +10,9 @@ export interface CrawlRunStats {
   errors: number;
   imagesUploaded: number;
   translationsCompleted: number;
+  proxyBytesTransferred?: number;
+  translationInputTokens?: number;
+  translationOutputTokens?: number;
 }
 
 export interface CrawlRun {
@@ -74,6 +77,9 @@ export async function completeCrawlRun(
       errors: stats.errors,
       images_uploaded: stats.imagesUploaded,
       translations_completed: stats.translationsCompleted,
+      proxy_bytes_transferred: stats.proxyBytesTransferred ?? 0,
+      translation_input_tokens: stats.translationInputTokens ?? 0,
+      translation_output_tokens: stats.translationOutputTokens ?? 0,
       duration_ms: Date.now() - startTime,
       warnings: warnings.slice(0, 100), // Cap at 100 warnings
       completed_at: new Date().toISOString(),

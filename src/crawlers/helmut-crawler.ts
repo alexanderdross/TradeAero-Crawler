@@ -6,7 +6,8 @@ import { getSystemUserId } from "../db/system-user.js";
 import { parseAircraftPage } from "../parsers/helmut-aircraft.js";
 import { parsePartsPage } from "../parsers/helmut-parts.js";
 import type { CrawlResult } from "../types.js";
-import { delay, fetchPage } from "../utils/fetch.js";
+import { delay, fetchPage, getProxyBytesTransferred, resetProxyBytesTransferred } from "../utils/fetch.js";
+import { getTranslationTokenUsage, resetTranslationTokenUsage } from "../utils/translate.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -36,6 +37,8 @@ async function crawlHelmutAircraft(): Promise<CrawlResult> {
   let listingsSkipped = 0;
 
   const dbRunId = await startCrawlRun(src.name, "aircraft");
+  resetProxyBytesTransferred();
+  resetTranslationTokenUsage();
   logger.info("Starting Helmut aircraft crawl", { dbRunId });
 
   try {
@@ -64,10 +67,13 @@ async function crawlHelmutAircraft(): Promise<CrawlResult> {
     }
 
     if (dbRunId) {
+      const tokens = getTranslationTokenUsage();
       await completeCrawlRun(dbRunId, {
         pagesProcessed: src.aircraft.length, listingsFound, listingsInserted,
         listingsUpdated, listingsSkipped, errors: errors.length,
         imagesUploaded: listingsInserted, translationsCompleted: listingsInserted + listingsUpdated,
+        proxyBytesTransferred: getProxyBytesTransferred(),
+        translationInputTokens: tokens.input, translationOutputTokens: tokens.output,
       }, startTime);
     }
   } catch (err) {
@@ -92,6 +98,8 @@ async function crawlHelmutParts(): Promise<CrawlResult> {
   let listingsSkipped = 0;
 
   const dbRunId = await startCrawlRun(src.name, "parts");
+  resetProxyBytesTransferred();
+  resetTranslationTokenUsage();
   logger.info("Starting Helmut parts crawl", { dbRunId });
 
   try {
@@ -120,10 +128,13 @@ async function crawlHelmutParts(): Promise<CrawlResult> {
     }
 
     if (dbRunId) {
+      const tokens = getTranslationTokenUsage();
       await completeCrawlRun(dbRunId, {
         pagesProcessed: src.parts.length, listingsFound, listingsInserted,
         listingsUpdated, listingsSkipped, errors: errors.length,
         imagesUploaded: listingsInserted, translationsCompleted: listingsInserted + listingsUpdated,
+        proxyBytesTransferred: getProxyBytesTransferred(),
+        translationInputTokens: tokens.input, translationOutputTokens: tokens.output,
       }, startTime);
     }
   } catch (err) {

@@ -40,6 +40,7 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
       }
 
       const html = await response.text();
+      if (useProxy) trackProxyBytes(html.length);
       logger.info(`Fetched ${url}`, { bytes: html.length, attempt, proxy: useProxy });
       return html;
     } catch (error) {
@@ -82,10 +83,26 @@ export async function fetchBinary(url: string, options?: { proxy?: boolean }): P
 
     const contentType = response.headers.get("content-type") ?? "";
     const buffer = Buffer.from(await response.arrayBuffer());
+    if (useProxy && buffer.length > 0) trackProxyBytes(buffer.length);
     return buffer.length > 0 ? { buffer, contentType } : null;
   } catch {
     return null;
   }
+}
+
+/** Cumulative proxy bytes transferred in this process */
+let _proxyBytesTransferred = 0;
+
+export function getProxyBytesTransferred(): number {
+  return _proxyBytesTransferred;
+}
+
+export function resetProxyBytesTransferred(): void {
+  _proxyBytesTransferred = 0;
+}
+
+function trackProxyBytes(bytes: number): void {
+  _proxyBytesTransferred += bytes;
 }
 
 function getProxyUrl(): string | null {
