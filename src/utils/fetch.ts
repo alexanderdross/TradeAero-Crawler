@@ -2,12 +2,14 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../config.js";
 import { logger } from "./logger.js";
 
+/** Timeout for all fetch calls — prevents hanging connections (CWE-400) */
+const FETCH_TIMEOUT_MS = 30_000;
+/** Max page size in bytes — prevents memory exhaustion */
+const MAX_PAGE_SIZE = 10 * 1024 * 1024;
+
 /**
  * Fetch a URL with polite crawling: User-Agent header, retry logic, delay,
- * and optional Bright Data proxy support.
- *
- * Proxy is used when BRIGHT_DATA_PROXY_URL is set in environment.
- * Format: http://username:password@brd.superproxy.io:22225
+ * timeout, and optional Bright Data proxy support.
  */
 export async function fetchPage(url: string, options?: { proxy?: boolean }): Promise<string> {
   const maxRetries = 3;
@@ -21,9 +23,9 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
           Accept: "text/html,application/xhtml+xml",
           "Accept-Language": "de-DE,de;q=0.9,en;q=0.5",
         },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       };
 
-      // Use Bright Data proxy if configured
       if (useProxy) {
         const proxyUrl = getProxyUrl()!;
         const agent = new HttpsProxyAgent(proxyUrl);
@@ -39,7 +41,18 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
+      // Check Content-Length before reading body
+      const contentLength = parseInt(response.headers.get("content-length") ?? "0", 10);
+      if (contentLength > MAX_PAGE_SIZE) {
+        throw new Error(`Response too large: ${contentLength} bytes (limit: ${MAX_PAGE_SIZE})`);
+      }
+
       const html = await response.text();
+
+      if (html.length > MAX_PAGE_SIZE) {
+        throw new Error(`Response body too large: ${html.length} bytes`);
+      }
+
       if (useProxy) trackProxyBytes(html.length);
       logger.info(`Fetched ${url}`, { bytes: html.length, attempt, proxy: useProxy });
       return html;
@@ -51,7 +64,6 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
         throw new Error(`Failed to fetch ${url} after ${maxRetries} attempts: ${msg}`);
       }
 
-      // Exponential backoff: 2s, 4s
       await delay(2000 * attempt);
     }
   }
@@ -60,7 +72,7 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
 }
 
 /**
- * Fetch a binary resource (e.g., image) with optional proxy support.
+ * Fetch a binary resource (e.g., image) with optional proxy support and timeout.
  */
 export async function fetchBinary(url: string, options?: { proxy?: boolean }): Promise<{ buffer: Buffer; contentType: string } | null> {
   const useProxy = (options?.proxy ?? false) && !!getProxyUrl();
@@ -71,6 +83,7 @@ export async function fetchBinary(url: string, options?: { proxy?: boolean }): P
         "User-Agent": config.crawler.userAgent,
         Accept: "image/*",
       },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     };
 
     if (useProxy) {

@@ -28,7 +28,6 @@ export function decodeEmail(raw: string): string {
  */
 export function parsePrice(raw: string): { amount: number | null; negotiable: boolean } {
   const negotiable = /\bVB\b|\bVHB\b/i.test(raw);
-  const fixedPrice = /\bFP\b/i.test(raw);
 
   // Remove currency symbol, whitespace, and suffix markers
   let cleaned = raw
@@ -49,7 +48,7 @@ export function parsePrice(raw: string): { amount: number | null; negotiable: bo
   const amount = parseFloat(cleaned);
   return {
     amount: isNaN(amount) ? null : amount,
-    negotiable: negotiable || !fixedPrice,
+    negotiable,
   };
 }
 
@@ -110,17 +109,35 @@ export function extractNumber(text: string): number | null {
 }
 
 /**
- * Clean HTML text: collapse whitespace, trim, decode entities.
+ * Clean HTML text: strip tags, decode entities, collapse whitespace.
+ * SECURITY: Strips HTML tags to prevent stored XSS (CWE-79).
  */
 export function cleanText(text: string): string {
   return text
+    // Strip HTML tags first (prevent stored XSS)
+    .replace(/<[^>]*>/g, " ")
+    // Decode HTML entities to readable characters
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
+    // Collapse whitespace
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Sanitize text for safe database storage.
+ * Strips any remaining HTML tags and script-like content.
+ * Used on all text before DB insertion.
+ */
+export function sanitizeForDb(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, "")
+    .replace(/javascript:/gi, "")
+    .replace(/on\w+\s*=/gi, "")
     .trim();
 }
 

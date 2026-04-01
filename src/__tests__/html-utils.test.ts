@@ -28,11 +28,11 @@ describe("decodeEmail", () => {
 
 describe("parsePrice", () => {
   it("parses simple Euro price", () => {
-    expect(parsePrice("€12500")).toEqual({ amount: 12500, negotiable: true });
+    expect(parsePrice("€12500")).toEqual({ amount: 12500, negotiable: false });
   });
 
   it("parses German-formatted price with dot separator", () => {
-    expect(parsePrice("€12.500,-")).toEqual({ amount: 12500, negotiable: true });
+    expect(parsePrice("€12.500,-")).toEqual({ amount: 12500, negotiable: false });
   });
 
   it("parses price with VB suffix", () => {

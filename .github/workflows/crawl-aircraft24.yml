@@ -46,4 +46,4 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRIGHT_DATA_PROXY_URL: ${{ secrets.BRIGHT_DATA_PROXY_URL }}
           CRAWL_DELAY_MS: "3000"
-        run: node dist/index.js --source aircraft24 --target ${{ github.event.inputs.target || 'all' }}
+        run: node dist/index.js --source aircraft24 --target "${{ github.event.inputs.target || 'all' }}"
