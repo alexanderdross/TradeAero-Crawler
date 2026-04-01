@@ -20,6 +20,20 @@ export async function upsertAircraftListing(
   listing: ParsedAircraftListing,
   systemUserId: string
 ): Promise<"inserted" | "updated" | "skipped"> {
+  // Validate required fields that have DB CHECK constraints
+  if (!listing.price || listing.price <= 0) {
+    logger.debug("Skipping listing: no valid price", { sourceId: listing.sourceId });
+    return "skipped";
+  }
+  if (!listing.year || listing.year < 1900 || listing.year > new Date().getFullYear() + 1) {
+    logger.debug("Skipping listing: no valid year", { sourceId: listing.sourceId, year: listing.year });
+    return "skipped";
+  }
+  if (!listing.description || listing.description.trim().length === 0) {
+    logger.debug("Skipping listing: no description", { sourceId: listing.sourceId });
+    return "skipped";
+  }
+
   // Check if listing already exists by source_url + source_id
   const { data: existing } = await supabase
     .from("aircraft_listings")
@@ -65,15 +79,15 @@ export async function upsertAircraftListing(
 
 function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) {
   return {
-    // Required fields
+    // Required fields (validated before this point)
     headline: listing.title,
     headline_de: listing.title,
-    model: listing.title, // Best approximation from unstructured data
-    year: listing.year ?? 0,
-    registration: "N/A", // Not available in source
-    serial_number: "N/A", // Not available in source
+    model: listing.title,
+    year: listing.year!,
+    registration: "N/A",
+    serial_number: "N/A",
     location: listing.location ?? "Deutschland",
-    price: listing.price ?? 0,
+    price: listing.price!,
     currency: config.defaultCurrency,
     price_negotiable: listing.priceNegotiable,
     description: listing.description,
@@ -98,7 +112,8 @@ function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) 
     max_takeoff_weight: listing.mtow?.toString() ?? null,
     max_takeoff_weight_unit: listing.mtow ? "kg" : null,
     engine_type_name: listing.engine,
-    last_annual_inspection: listing.annualInspection,
+    // Only set if it's a valid ISO date (YYYY-MM-DD)
+    last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
 
     // Images as JSONB array [{url, alt}]
     images: listing.imageUrls.map((url) => ({
@@ -110,4 +125,10 @@ function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) 
     auto_translate: false,
     headline_auto_translate: false,
   };
+}
+
+/** Check if a string is a valid ISO date (YYYY-MM-DD) */
+function isValidIsoDate(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !isNaN(Date.parse(value));
 }

@@ -54,13 +54,38 @@ export function parsePrice(raw: string): { amount: number | null; negotiable: bo
 }
 
 /**
- * Parse a German date string (DD.MM.YYYY) into an ISO date string.
+ * Parse a German date string into an ISO date string (YYYY-MM-DD).
+ * Handles formats: DD.MM.YYYY, MM/YYYY, "April 2026", "Dez 2025"
  */
 export function parseGermanDate(dateStr: string): string | null {
-  const match = dateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
-  if (!match) return null;
-  const [, day, month, year] = match;
-  return `${year}-${month}-${day}`;
+  // DD.MM.YYYY
+  const fullMatch = dateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (fullMatch) {
+    const [, day, month, year] = fullMatch;
+    return `${year}-${month}-${day}`;
+  }
+
+  // MM/YYYY → first of month
+  const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const month = slashMatch[1].padStart(2, "0");
+    return `${slashMatch[2]}-${month}-01`;
+  }
+
+  // German month name + year (e.g., "April 2026", "Dez 2025")
+  const germanMonths: Record<string, string> = {
+    januar: "01", jan: "01", februar: "02", feb: "02", "märz": "03", mar: "03",
+    april: "04", apr: "04", mai: "05", juni: "06", jun: "06",
+    juli: "07", jul: "07", august: "08", aug: "08", september: "09", sep: "09",
+    oktober: "10", okt: "10", november: "11", nov: "11", dezember: "12", dez: "12",
+  };
+  const nameMatch = dateStr.match(/([A-Za-zäöü]+)\s+(\d{4})/);
+  if (nameMatch) {
+    const monthNum = germanMonths[nameMatch[1].toLowerCase()];
+    if (monthNum) return `${nameMatch[2]}-${monthNum}-01`;
+  }
+
+  return null;
 }
 
 /**
