@@ -1,20 +1,15 @@
 import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config.js";
+import { uploadImages } from "../utils/images.js";
+import { translateListing, type TranslationResult } from "../utils/translate.js";
+import { generateSlug, generateLocalizedSlugs } from "../utils/slug.js";
 import type { ParsedAircraftListing } from "../types.js";
 
 /**
  * Upsert a parsed aircraft listing into the Supabase `aircraft_listings` table.
  *
- * Schema mapping:
- * - Uses `source_url` column for deduplication (Epic 4.1)
- * - Sets `source_name` and `is_external` for origin tracking (Epic 3)
- * - Populates required fields with scraped data or safe defaults
- * - Sets status = 'active' for display on /aircraft/
- * - Uses a dedicated system user_id for scraped listings (Epic 3.3)
- *
- * Required NOT NULL columns: headline, model, year, registration, serial_number,
- *   location, price, currency, description, contact_name, contact_email, contact_phone
+ * Flow: validate → check dedup → upload images → translate → insert/update
  */
 export async function upsertAircraftListing(
   listing: ParsedAircraftListing,
@@ -41,13 +36,22 @@ export async function upsertAircraftListing(
     .eq("source_url", listing.sourceId)
     .maybeSingle();
 
-  const record = mapToAircraftRow(listing, systemUserId);
+  // Upload images to Supabase Storage (only for new listings)
+  const images = existing
+    ? []
+    : await uploadImages(listing.imageUrls, listing.title);
+
+  // Translate headline + description into all 14 locales
+  const translations = await translateListing(listing.title, listing.description, "de");
+
+  const record = mapToAircraftRow(listing, systemUserId, images, translations);
 
   if (existing) {
-    // Update existing record
+    // Update existing record (keep existing images)
+    const { images: _skipImages, ...updateRecord } = record;
     const { error } = await supabase
       .from("aircraft_listings")
-      .update({ ...record, updated_at: new Date().toISOString() })
+      .update({ ...updateRecord, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
 
     if (error) {
@@ -77,11 +81,18 @@ export async function upsertAircraftListing(
   return "inserted";
 }
 
-function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) {
+function mapToAircraftRow(
+  listing: ParsedAircraftListing,
+  systemUserId: string,
+  uploadedImages: Array<{ url: string; alt: string }>,
+  translations: TranslationResult | null
+) {
+  // Build locale-specific headline, description, and slug columns
+  const localeFields = buildLocaleFields(listing.title, listing.description, translations);
+
   return {
     // Required fields (validated before this point)
     headline: listing.title,
-    headline_de: listing.title,
     model: listing.title,
     year: listing.year!,
     registration: "N/A",
@@ -91,11 +102,16 @@ function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) 
     currency: config.defaultCurrency,
     price_negotiable: listing.priceNegotiable,
     description: listing.description,
-    description_de: listing.description,
     contact_name: listing.contactName ?? "Siehe Originalanzeige",
     contact_email: listing.contactEmail ?? "noreply@trade.aero",
     contact_phone: listing.contactPhone ?? "",
     agree_to_terms: true,
+
+    // All 14 locale columns for headline, description, and slug
+    ...localeFields,
+
+    // Base slug
+    slug: generateSlug(listing.title),
 
     // Ownership & origin (Epic 3)
     user_id: systemUserId,
@@ -112,19 +128,46 @@ function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) 
     max_takeoff_weight: listing.mtow?.toString() ?? null,
     max_takeoff_weight_unit: listing.mtow ? "kg" : null,
     engine_type_name: listing.engine,
-    // Only set if it's a valid ISO date (YYYY-MM-DD)
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
 
-    // Images as JSONB array [{url, alt}]
-    images: listing.imageUrls.map((url) => ({
-      url,
-      alt: listing.title,
-    })),
+    // Images as JSONB array [{url, alt}] — uploaded to Supabase Storage
+    images: uploadedImages,
 
-    // Auto-translate disabled for scraped content (already in German)
+    // Translation was handled by crawler, not by frontend auto-translate
     auto_translate: false,
     headline_auto_translate: false,
   };
+}
+
+const LANGS = ["en", "de", "fr", "es", "it", "pl", "cs", "sv", "nl", "pt", "ru", "tr", "el", "no"] as const;
+
+function buildLocaleFields(
+  headline: string,
+  description: string,
+  translations: TranslationResult | null
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+
+  // Generate slugs from translations (or fallback to German for all)
+  const slugSource: Record<string, { headline: string }> = {};
+
+  for (const lang of LANGS) {
+    const t = translations?.[lang];
+    const h = t?.headline ?? headline;
+    const d = t?.description ?? description;
+
+    fields[`headline_${lang}`] = h;
+    fields[`description_${lang}`] = d;
+    slugSource[lang] = { headline: h };
+  }
+
+  // Generate localized slugs
+  const slugs = generateLocalizedSlugs(slugSource);
+  for (const lang of LANGS) {
+    fields[`slug_${lang}`] = slugs[lang];
+  }
+
+  return fields;
 }
 
 /** Check if a string is a valid ISO date (YYYY-MM-DD) */
