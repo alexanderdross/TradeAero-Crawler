@@ -204,23 +204,88 @@ function extractModel(title: string, manufacturerName: string): string {
 }
 
 /**
- * Detect aircraft category from Helmut's UL Seiten content.
- * Most listings are ultralight / light sport aircraft.
+ * Detect aircraft category based on engine type, manufacturer, and content.
  *
  * Category IDs from aircraft_categories table:
  *  1=Single Engine Piston, 2=Multi Engine Piston, 9=Turboprop,
- * 10=Helicopter, 11=Light Sport Aircraft, 13=Other
+ * 10=Helicopter, 11=Light Sport Aircraft, 12=Commercial Airliner, 13=Other
+ *
+ * Key rule: Rotax engines → Light Sport Aircraft (11)
+ *          Lycoming/Continental engines → Single Engine Piston (1)
  */
-function detectCategoryId(title: string, description: string): number {
-  const text = `${title} ${description}`.toLowerCase();
+function detectCategoryId(title: string, description: string, engine: string | null, manufacturer: string): number {
+  const text = `${title} ${description} ${engine ?? ""}`.toLowerCase();
+  const mfg = manufacturer.toLowerCase();
 
-  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return 10; // Helicopter (closest)
-  if (/motorschirm|paramotor|gleitschirm|paraglider|trike/i.test(text)) return 13; // Other
-  if (/hubschrauber|helicopter|heli\b/i.test(text)) return 10; // Helicopter
-  if (/turboprop/i.test(text)) return 9; // Turboprop
-  if (/motorsegler|touring motor glider|tmg/i.test(text)) return 11; // Light Sport
+  // Helicopter / Gyrocopter
+  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return 10;
+  if (/hubschrauber|helicopter|heli\b/i.test(text)) return 10;
+  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return 10;
+  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return 10;
 
-  // Default for Helmut's UL Seiten: Light Sport Aircraft (ultralight)
+  // Gliders / Motorgliders → 14
+  if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return 14;
+  if (["stemme", "schempp-hirth", "dg flugzeugbau"].includes(mfg)) return 14;
+  if (mfg === "scheibe") return 14;
+
+  // Paramotors, trikes, flex-wing → 15 (Microlight / Flex-Wing)
+  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen|flex.?wing/i.test(text)) return 15;
+  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation"].includes(mfg)) return 15;
+
+  // Jets
+  if (/\bjet\b|citation|phenom|learjet|gulfstream|bombardier|challenger|falcon\b|global\s*\d/i.test(text)) {
+    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return 3; // Very Light Jet
+    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return 4; // Light Jet
+    if (/mid.?size|xls|latitude|hawker/i.test(text)) return 5; // Mid-Size Jet
+    if (/super mid|longitude|challenger|praetor/i.test(text)) return 6; // Super Mid-Size Jet
+    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return 7; // Heavy Jet
+    if (/ultra.?long|g700|global 7/i.test(text)) return 8; // Ultra Long Range
+    return 4; // Default jet → Light Jet
+  }
+  if (["cirrus", "eclipse", "hondajet", "embraer", "bombardier", "gulfstream", "dassault", "learjet", "hawker"].includes(mfg)) {
+    if (mfg === "cirrus" && /sr2[02]/i.test(text)) return 1; // Cirrus SR20/SR22 = Single Engine Piston
+    return 4; // Default for jet manufacturers
+  }
+
+  // Turboprop
+  if (/turboprop|pt6|king air|tbm|pc-12|pc-6|caravan|kodiak|piaggio|dornier|atr/i.test(text)) return 9;
+  if (["daher", "pilatus", "quest", "piaggio", "dornier", "atr", "epic"].includes(mfg)) return 9;
+
+  // Multi Engine Piston
+  if (/twin|multi.?engine|seneca|seminole|baron|duchess|navajo|aztec|pa-3[014]|pa-44|cessna 3[0-4]\d|cessna 4[0-2]\d|da42|p68/i.test(text)) return 2;
+
+  // Engine-based detection (most reliable for piston aircraft)
+  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return 11; // Light Sport Aircraft (UL engines)
+  if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return 1; // Single Engine Piston (GA engines)
+
+  // Manufacturer-based fallback
+  const sepManufacturers = ["cessna", "piper", "beechcraft", "mooney", "grumman", "socata",
+    "robin", "jodel", "grob", "zlin", "fuji", "commander", "lake", "bellanca",
+    "stinson", "luscombe", "aeronca", "taylorcraft", "globe", "ercoupe",
+    "maule", "aviat", "american champion", "cubcrafters", "extra"];
+  const lsaManufacturers = ["dynamic", "aerospool", "comco ikarus", "comco", "ikarus",
+    "flight design", "pipistrel", "tecnam", "evektor", "remos", "pioneer",
+    "fk lightplanes", "fk", "roland", "icp", "aeropro", "flysynthesis",
+    "tl ultralight", "dynaero", "zenair", "aeroprakt", "brm aero", "bristell",
+    "jabiru", "corvus", "alpi aviation", "atec", "shark aero", "tomark",
+    "blackshape", "czech sport aircraft", "sling", "breezer", "jmb",
+    "just aircraft", "kitfox", "rans", "sonex", "scheibe", "stemme",
+    "heller", "vampire", "sd planes", "aeropilot"];
+  const experimentalManufacturers = ["vans", "van's", "lancair", "glasair", "murphy",
+    "pitts", "xtremair", "sukhoi", "yakovlev", "cap aviation", "mudry", "nanchang"];
+
+  if (sepManufacturers.includes(mfg)) return 1; // Single Engine Piston
+  if (lsaManufacturers.includes(mfg)) return 11; // Light Sport Aircraft
+  if (experimentalManufacturers.includes(mfg)) return 13; // Other (Experimental)
+
+  // Diamond: depends on model
+  if (mfg === "diamond") {
+    if (/da42|da62/i.test(text)) return 2; // Multi Engine
+    if (/hk36|dimona/i.test(text)) return 14; // Glider / motorglider
+    return 1; // DA20, DA40, DA50 = Single Engine Piston
+  }
+
+  // Default for unknown: Light Sport Aircraft (Helmut's site is UL-focused)
   return 11;
 }
 
@@ -418,7 +483,7 @@ async function mapToAircraftRow(
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
-  const categoryId = detectCategoryId(listing.title, listing.description);
+  const categoryId = detectCategoryId(listing.title, listing.description, listing.engine, manufacturer.name);
   const seats = detectSeats(listing.title, listing.description);
   const originalUrl = listing.sourceUrl;
 
