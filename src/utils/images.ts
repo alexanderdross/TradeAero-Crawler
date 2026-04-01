@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { supabase } from "../db/client.js";
-import { config } from "../config.js";
 import { logger } from "./logger.js";
+import { fetchBinary } from "./fetch.js";
 
 const MAX_CONCURRENT = 3;
 
@@ -46,26 +46,14 @@ async function downloadAndUpload(
   bucket: string
 ): Promise<{ url: string; alt: string } | null> {
   try {
-    // Download the image
-    const response = await fetch(sourceUrl, {
-      headers: {
-        "User-Agent": config.crawler.userAgent,
-        Accept: "image/*",
-      },
-    });
-
-    if (!response.ok) {
-      logger.warn("Failed to download image", { sourceUrl, status: response.status });
+    // Download the image (uses proxy if configured)
+    const result = await fetchBinary(sourceUrl);
+    if (!result) {
+      logger.warn("Failed to download image", { sourceUrl });
       return null;
     }
 
-    const contentType = response.headers.get("content-type") ?? "";
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    if (buffer.length === 0) {
-      logger.warn("Empty image body", { sourceUrl });
-      return null;
-    }
+    const { buffer, contentType } = result;
 
     // Determine extension: keep png as png, everything else as jpg
     const ext = contentType.includes("png") ? "png" : "jpg";
