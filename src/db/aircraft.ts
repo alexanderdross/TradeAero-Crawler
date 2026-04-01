@@ -268,41 +268,56 @@ export async function upsertAircraftListing(
     logger.debug("Skipping listing: no valid year", { sourceId: listing.sourceId, year: listing.year });
     return "skipped";
   }
-  if (!listing.description || listing.description.trim().length === 0) {
-    logger.debug("Skipping listing: no description", { sourceId: listing.sourceId });
-    return "skipped";
+
+  // Fix: ensure description is never empty (description_check constraint)
+  if (!listing.description || listing.description.trim().length < 3) {
+    listing.description = listing.title;
   }
 
   const { data: existing } = await supabase
     .from("aircraft_listings")
-    .select("id, updated_at")
+    .select("id, updated_at, images")
     .eq("source_url", listing.sourceId)
     .maybeSingle();
 
-  // Upload images to Supabase Storage (only for new listings)
-  const images = existing
-    ? []
-    : await uploadImages(listing.imageUrls, listing.title);
-
-  // Translate headline + description into all 14 locales
-  const translations = await translateListing(listing.title, listing.description, "de");
-
-  // Resolve manufacturer from DB
+  // Resolve manufacturer (needed for both paths)
   const manufacturer = await resolveManufacturer(listing.title);
 
-  let record = await mapToAircraftRow(listing, systemUserId, images, translations, manufacturer);
-
-  // Enrich with reference specs for known aircraft models (fills missing performance, engine, seats, fuel)
-  const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
-  if (refSpecs) {
-    record = applyReferenceSpecs(record, refSpecs) as typeof record;
-  }
-
   if (existing) {
-    const { images: _skipImages, ...updateRecord } = record;
+    // ── UPDATE PATH (fast: skip translation, re-upload external images) ──
+
+    // Re-upload images if they're still pointing to external URLs
+    const existingImages = (existing.images as Array<{ url?: string }>) ?? [];
+    const hasExternalImages = existingImages.length > 0 && existingImages.some(
+      (img) => img.url && !img.url.includes("supabase.co")
+    );
+    let freshImages: Array<{ url: string; alt: string }> = [];
+    if (hasExternalImages && listing.imageUrls.length > 0) {
+      freshImages = await uploadImages(listing.imageUrls, listing.title);
+      if (freshImages.length > 0) {
+        logger.debug("Re-uploaded external images", { sourceId: listing.sourceId, count: freshImages.length });
+      }
+    }
+
+    // Build record WITHOUT translation (keep existing translations)
+    const record = await mapToAircraftRow(listing, systemUserId, freshImages, null, manufacturer);
+
+    // Enrich with reference specs
+    let enriched = record as Record<string, unknown>;
+    const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
+    if (refSpecs) enriched = applyReferenceSpecs(enriched, refSpecs);
+
+    // Strip locale fields from update to preserve existing translations
+    const updateFields: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(enriched)) {
+      if (/^(headline|description|slug)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
+      if (key === "images" && freshImages.length === 0) continue;
+      updateFields[key] = value;
+    }
+
     const { error } = await supabase
       .from("aircraft_listings")
-      .update({ ...updateRecord, updated_at: new Date().toISOString() })
+      .update({ ...updateFields, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
 
     if (error) {
@@ -311,6 +326,17 @@ export async function upsertAircraftListing(
     }
     logger.debug("Updated aircraft listing", { sourceId: listing.sourceId });
     return "updated";
+  }
+
+  // ── INSERT PATH (full pipeline: images + translation + enrichment) ──
+  const images = await uploadImages(listing.imageUrls, listing.title);
+  const translations = await translateListing(listing.title, listing.description, "de");
+
+  let record = await mapToAircraftRow(listing, systemUserId, images, translations, manufacturer);
+
+  const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
+  if (refSpecs) {
+    record = applyReferenceSpecs(record, refSpecs) as typeof record;
   }
 
   const { error } = await supabase
