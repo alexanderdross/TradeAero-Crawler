@@ -7,9 +7,13 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "crawl:aircraft": "tsx src/index.ts --target aircraft",
-    "crawl:parts": "tsx src/index.ts --target parts",
-    "crawl:all": "tsx src/index.ts --target all",
+    "crawl:helmut": "tsx src/index.ts --source helmut",
+    "crawl:helmut:aircraft": "tsx src/index.ts --source helmut --target aircraft",
+    "crawl:helmut:parts": "tsx src/index.ts --source helmut --target parts",
+    "crawl:aircraft24": "tsx src/index.ts --source aircraft24",
+    "crawl:aeromarkt": "tsx src/index.ts --source aeromarkt",
+    "crawl:all": "tsx src/index.ts --source helmut && tsx src/index.ts --source aircraft24 && tsx src/index.ts --source aeromarkt",
+    "seed:reference-specs": "tsx src/scripts/seed-reference-specs.ts",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -30,7 +34,8 @@
     "@anthropic-ai/sdk": "^0.81.0",
     "@supabase/supabase-js": "^2.49.1",
     "cheerio": "^1.0.0",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "https-proxy-agent": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.12.0",

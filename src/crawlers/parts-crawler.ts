@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { upsertPartsListing } from "../db/parts.js";
+import { startCrawlRun, completeCrawlRun, failCrawlRun } from "../db/crawler-runs.js";
 import { getSystemUserId } from "../db/system-user.js";
 import { parsePartsPage } from "../parsers/parts.js";
 import type { CrawlResult } from "../types.js";
@@ -11,55 +12,82 @@ import { logger } from "../utils/logger.js";
  * parse them, and upsert into Supabase.
  */
 export async function crawlParts(): Promise<CrawlResult> {
-  const runId = `parts-${Date.now()}`;
+  const startTime = Date.now();
   const startedAt = new Date().toISOString();
   const errors: string[] = [];
+  const warnings: string[] = [];
   let listingsFound = 0;
   let listingsInserted = 0;
   let listingsUpdated = 0;
   let listingsSkipped = 0;
 
-  logger.info("Starting parts crawl", { runId });
+  const dbRunId = await startCrawlRun(config.sources.helmut.name, "parts");
 
-  const systemUserId = await getSystemUserId();
-  const urls = config.sources.helmut.parts;
+  logger.info("Starting parts crawl", { dbRunId });
 
-  for (const url of urls) {
-    try {
-      const html = await fetchPage(url);
-      const listings = parsePartsPage(html, url, config.sources.helmut.name);
-      listingsFound += listings.length;
+  try {
+    const systemUserId = await getSystemUserId();
+    const urls = config.sources.helmut.parts;
 
-      for (const listing of listings) {
-        const result = await upsertPartsListing(listing, systemUserId);
-        switch (result) {
-          case "inserted":
-            listingsInserted++;
-            break;
-          case "updated":
-            listingsUpdated++;
-            break;
-          case "skipped":
-            listingsSkipped++;
-            break;
+    for (const url of urls) {
+      try {
+        const html = await fetchPage(url);
+        const listings = parsePartsPage(html, url, config.sources.helmut.name);
+        listingsFound += listings.length;
+
+        for (const listing of listings) {
+          const result = await upsertPartsListing(listing, systemUserId);
+          switch (result) {
+            case "inserted":
+              listingsInserted++;
+              break;
+            case "updated":
+              listingsUpdated++;
+              break;
+            case "skipped":
+              listingsSkipped++;
+              break;
+          }
         }
-      }
 
-      await delay();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`${url}: ${msg}`);
-      logger.error("Failed to crawl parts page", { url, error: msg });
+        await delay();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${url}: ${msg}`);
+        logger.error("Failed to crawl parts page", { url, error: msg });
+      }
     }
+
+    if (dbRunId) {
+      await completeCrawlRun(
+        dbRunId,
+        {
+          pagesProcessed: urls.length,
+          listingsFound,
+          listingsInserted,
+          listingsUpdated,
+          listingsSkipped,
+          errors: errors.length,
+          imagesUploaded: listingsInserted,
+          translationsCompleted: listingsInserted + listingsUpdated,
+        },
+        startTime,
+        warnings
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (dbRunId) await failCrawlRun(dbRunId, msg, startTime);
+    throw err;
   }
 
   const result: CrawlResult = {
-    runId,
+    runId: dbRunId ?? `parts-${startTime}`,
     source: config.sources.helmut.name,
     target: "parts",
     startedAt,
     completedAt: new Date().toISOString(),
-    pagesProcessed: urls.length,
+    pagesProcessed: config.sources.helmut.parts.length,
     listingsFound,
     listingsInserted,
     listingsUpdated,
@@ -68,7 +96,6 @@ export async function crawlParts(): Promise<CrawlResult> {
   };
 
   logger.info("Parts crawl completed", {
-    runId,
     found: listingsFound,
     inserted: listingsInserted,
     updated: listingsUpdated,

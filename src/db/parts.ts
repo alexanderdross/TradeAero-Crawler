@@ -28,38 +28,52 @@ export async function upsertPartsListing(
 ): Promise<"inserted" | "updated" | "skipped"> {
   const { data: existing } = await supabase
     .from("parts_listings")
-    .select("id, updated_at")
+    .select("id, updated_at, images")
     .eq("source_url", listing.sourceId)
     .maybeSingle();
 
-  // Upload images to Supabase Storage (only for new listings)
-  const images = existing
-    ? []
-    : await uploadImages(listing.imageUrls, listing.title, "parts-images");
-
-  // Translate headline + description into all 14 locales
-  const desc = listing.description || listing.title;
-  const translations = await translateListing(listing.title, desc, "de");
-
-  const record = mapToPartsRow(listing, systemUserId, images, translations);
+  // Ensure description is never empty
+  const desc = listing.description?.trim() || listing.title;
 
   if (existing) {
-    const { images: _skipImages, ...updateRecord } = record;
+    // ── UPDATE PATH (fast: skip translation, re-upload external images) ──
+    const existingImages = (existing.images as Array<{ url?: string }>) ?? [];
+    const hasExternalImages = existingImages.length > 0 && existingImages.some(
+      (img) => img.url && !img.url.includes("supabase.co")
+    );
+    let freshImages: Array<{ url: string; alt: string }> = [];
+    if (hasExternalImages && listing.imageUrls.length > 0) {
+      freshImages = await uploadImages(listing.imageUrls, listing.title, "parts-images");
+    }
+
+    const record = mapToPartsRow(listing, systemUserId, freshImages, null);
+
+    // Strip locale fields to preserve existing translations
+    const updateFields: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (/^(headline|description|slug|remaining_life)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
+      if (key === "images" && freshImages.length === 0) continue;
+      updateFields[key] = value;
+    }
+
     const { error } = await supabase
       .from("parts_listings")
-      .update({ ...updateRecord, updated_at: new Date().toISOString() })
+      .update({ ...updateFields, updated_at: new Date().toISOString() })
       .eq("id", existing.id);
 
     if (error) {
-      logger.error("Failed to update parts listing", {
-        sourceId: listing.sourceId,
-        error: error.message,
-      });
+      logger.error("Failed to update parts listing", { sourceId: listing.sourceId, error: error.message });
       return "skipped";
     }
     logger.debug("Updated parts listing", { sourceId: listing.sourceId });
     return "updated";
   }
+
+  // ── INSERT PATH (full pipeline) ──
+  const images = await uploadImages(listing.imageUrls, listing.title, "parts-images");
+  const translations = await translateListing(listing.title, desc, "de");
+
+  const record = mapToPartsRow(listing, systemUserId, images, translations);
 
   const { error } = await supabase
     .from("parts_listings")

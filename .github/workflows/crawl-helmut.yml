@@ -1,10 +1,8 @@
-name: Crawl Helmut's UL Seiten
+name: "Crawl Helmut's UL Seiten"
 
 on:
-  # Scheduled: daily at 06:00 UTC
   schedule:
     - cron: "0 6 * * *"
-  # Manual trigger
   workflow_dispatch:
     inputs:
       target:
@@ -18,12 +16,12 @@ on:
           - parts
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -48,4 +46,4 @@ jobs:
           CRAWLER_SYSTEM_USER_ID: ${{ secrets.CRAWLER_SYSTEM_USER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CRAWL_DELAY_MS: "2000"
-        run: node dist/index.js --target ${{ github.event.inputs.target || 'all' }}
+        run: node dist/index.js --source helmut --target ${{ github.event.inputs.target || 'all' }}

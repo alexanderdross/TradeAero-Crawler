@@ -1,5 +1,14 @@
 import "dotenv/config";
 
+export interface SourceConfig {
+  name: string;
+  baseUrl: string;
+  aircraft: string[];
+  parts: string[];
+  /** Use Bright Data proxy for this source (default: false) */
+  useProxy?: boolean;
+}
+
 export const config = {
   supabase: {
     url: process.env.SUPABASE_URL ?? "",
@@ -9,6 +18,10 @@ export const config = {
     userAgent:
       process.env.CRAWLER_USER_AGENT ?? "TradeAero-Crawler/1.0",
     delayMs: Number(process.env.CRAWL_DELAY_MS ?? 2000),
+  },
+  proxy: {
+    /** Bright Data proxy URL: http://user:pass@brd.superproxy.io:22225 */
+    url: process.env.BRIGHT_DATA_PROXY_URL ?? "",
   },
   sources: {
     helmut: {
@@ -20,9 +33,40 @@ export const config = {
         "https://www.helmuts-ul-seiten.de/verkauf1c.html",
       ],
       parts: ["https://www.helmuts-ul-seiten.de/verkauf2.html"],
+      useProxy: false,
     },
-  },
-  /** Default country for Helmut's listings (Germany) */
+    aircraft24: {
+      name: "aircraft24.de",
+      baseUrl: "https://www.aircraft24.de",
+      aircraft: [
+        "https://www.aircraft24.de/singleprop/index.htm",
+        "https://www.aircraft24.de/multiprop/index.htm",
+        "https://www.aircraft24.de/turboprop/index.htm",
+        "https://www.aircraft24.de/jet/index.htm",
+        "https://www.aircraft24.de/helicopter/index.htm",
+      ],
+      parts: [],
+      useProxy: true,
+    },
+    aeromarkt: {
+      name: "aeromarkt.net",
+      baseUrl: "https://www.aeromarkt.net",
+      aircraft: [
+        "https://www.aeromarkt.net/flugzeugmarkt/kolbenmotorflugzeuge",
+        "https://www.aeromarkt.net/flugzeugmarkt/jets-turboprops",
+        "https://www.aeromarkt.net/flugzeugmarkt/helikopter-gyrocopter",
+        "https://www.aeromarkt.net/flugzeugmarkt/leichtflugzeuge-ul-vla-ela",
+        "https://www.aeromarkt.net/flugzeugmarkt/experimentals-classics",
+        "https://www.aeromarkt.net/flugzeugmarkt/sonstige-luftfahrzeuge",
+      ],
+      parts: [
+        "https://www.aeromarkt.net/flugzeugmarkt/triebwerke",
+        "https://www.aeromarkt.net/flugzeugmarkt/avionik-instrumente",
+      ],
+      useProxy: true,
+    },
+  } satisfies Record<string, SourceConfig>,
+  /** Default country for German sources */
   defaultCountry: "DE",
   /** Default currency */
   defaultCurrency: "EUR",

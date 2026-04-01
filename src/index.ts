@@ -1,24 +1,31 @@
 import { validateConfig } from "./config.js";
-import { crawlAircraft } from "./crawlers/aircraft-crawler.js";
-import { crawlParts } from "./crawlers/parts-crawler.js";
+import { crawlHelmut } from "./crawlers/helmut-crawler.js";
+import { crawlAircraft24 } from "./crawlers/aircraft24-crawler.js";
+import { crawlAeromarkt } from "./crawlers/aeromarkt-crawler.js";
 import { logger } from "./utils/logger.js";
 
+type Source = "helmut" | "aircraft24" | "aeromarkt";
 type Target = "aircraft" | "parts" | "all";
 
 async function main(): Promise<void> {
   validateConfig();
 
+  const source = parseSource();
   const target = parseTarget();
-  logger.info(`TradeAero Crawler starting`, { target });
+  logger.info(`TradeAero Crawler starting`, { source, target });
 
   const results = [];
 
-  if (target === "aircraft" || target === "all") {
-    results.push(await crawlAircraft());
-  }
-
-  if (target === "parts" || target === "all") {
-    results.push(await crawlParts());
+  switch (source) {
+    case "helmut":
+      results.push(...(await crawlHelmut(target)));
+      break;
+    case "aircraft24":
+      results.push(...(await crawlAircraft24(target)));
+      break;
+    case "aeromarkt":
+      results.push(...(await crawlAeromarkt(target)));
+      break;
   }
 
   // Print summary
@@ -39,7 +46,6 @@ async function main(): Promise<void> {
     console.log(`  Duration:        ${timeDiff(r.startedAt, r.completedAt)}`);
   }
 
-  // Exit with error code if any crawl had errors
   const hasErrors = results.some((r) => r.errors.length > 0);
   if (hasErrors) {
     logger.warn("Crawl completed with errors");
@@ -47,6 +53,20 @@ async function main(): Promise<void> {
   }
 
   logger.info("Crawl completed successfully");
+}
+
+function parseSource(): Source {
+  const arg = process.argv.find((a) => a.startsWith("--source"));
+  if (!arg) return "helmut";
+
+  const value = arg.includes("=") ? arg.split("=")[1] : process.argv[process.argv.indexOf(arg) + 1];
+
+  if (value === "helmut" || value === "aircraft24" || value === "aeromarkt") {
+    return value;
+  }
+
+  logger.warn(`Unknown source "${value}", defaulting to "helmut"`);
+  return "helmut";
 }
 
 function parseTarget(): Target {

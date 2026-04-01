@@ -22,6 +22,19 @@ Rules:
 
 let client: Anthropic | null = null;
 
+/** Cumulative token usage in this process */
+let _totalInputTokens = 0;
+let _totalOutputTokens = 0;
+
+export function getTranslationTokenUsage(): { input: number; output: number } {
+  return { input: _totalInputTokens, output: _totalOutputTokens };
+}
+
+export function resetTranslationTokenUsage(): void {
+  _totalInputTokens = 0;
+  _totalOutputTokens = 0;
+}
+
 function getClient(): Anthropic {
   if (!client) {
     client = new Anthropic();
@@ -73,6 +86,10 @@ Return a JSON object with this exact structure:
         },
       ],
     });
+
+    // Track token usage for cost reporting
+    _totalInputTokens += response.usage?.input_tokens ?? 0;
+    _totalOutputTokens += response.usage?.output_tokens ?? 0;
 
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
