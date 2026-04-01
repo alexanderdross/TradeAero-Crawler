@@ -20,10 +20,19 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
       const fetchOptions: RequestInit & { agent?: unknown } = {
         headers: {
           "User-Agent": config.crawler.userAgent,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "de-DE,de;q=0.9,en;q=0.5",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Cache-Control": "no-cache",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "none",
+          "Sec-Fetch-User": "?1",
+          "Upgrade-Insecure-Requests": "1",
+          Referer: "",
         },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        redirect: "follow",
       };
 
       if (useProxy) {
@@ -81,9 +90,12 @@ export async function fetchBinary(url: string, options?: { proxy?: boolean }): P
     const fetchOptions: RequestInit & { agent?: unknown } = {
       headers: {
         "User-Agent": config.crawler.userAgent,
-        Accept: "image/*",
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+        Referer: "",
       },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      redirect: "follow",
     };
 
     if (useProxy) {
