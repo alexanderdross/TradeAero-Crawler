@@ -16,7 +16,8 @@ export const config = {
   },
   crawler: {
     userAgent:
-      process.env.CRAWLER_USER_AGENT ?? "TradeAero-Crawler/1.0",
+      process.env.CRAWLER_USER_AGENT ??
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     delayMs: Number(process.env.CRAWL_DELAY_MS ?? 2000),
   },
   proxy: {
