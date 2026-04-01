@@ -738,7 +738,7 @@ async function main() {
       }
 
       // Polite delay
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 200));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`  FAIL ${label}: ${msg}`);
