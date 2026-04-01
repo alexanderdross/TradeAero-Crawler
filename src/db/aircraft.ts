@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { uploadImages } from "../utils/images.js";
 import { translateListing, type TranslationResult } from "../utils/translate.js";
 import { generateSlug, generateLocalizedSlugs } from "../utils/slug.js";
+import { lookupReferenceSpecs, applyReferenceSpecs } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
 
 /**
@@ -149,7 +150,13 @@ export async function upsertAircraftListing(
   // Resolve manufacturer from DB
   const manufacturer = await resolveManufacturer(listing.title);
 
-  const record = await mapToAircraftRow(listing, systemUserId, images, translations, manufacturer);
+  let record = await mapToAircraftRow(listing, systemUserId, images, translations, manufacturer);
+
+  // Enrich with reference specs for known aircraft models (fills missing performance, engine, seats, fuel)
+  const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
+  if (refSpecs) {
+    record = applyReferenceSpecs(record, refSpecs) as typeof record;
+  }
 
   if (existing) {
     const { images: _skipImages, ...updateRecord } = record;
