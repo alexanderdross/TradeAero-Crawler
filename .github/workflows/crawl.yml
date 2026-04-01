@@ -1,0 +1,50 @@
+name: Crawl Helmut's UL Seiten
+
+on:
+  # Scheduled: daily at 06:00 UTC
+  schedule:
+    - cron: "0 6 * * *"
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Crawl target"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - aircraft
+          - parts
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run crawler
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CRAWLER_SYSTEM_USER_ID: ${{ secrets.CRAWLER_SYSTEM_USER_ID }}
+          CRAWL_DELAY_MS: "2000"
+        run: node dist/index.js --target ${{ github.event.inputs.target || 'all' }}
