@@ -1,0 +1,113 @@
+import { supabase } from "./client.js";
+import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+import type { ParsedAircraftListing } from "../types.js";
+
+/**
+ * Upsert a parsed aircraft listing into the Supabase `aircraft_listings` table.
+ *
+ * Schema mapping:
+ * - Uses `source_url` column for deduplication (Epic 4.1)
+ * - Sets `source_name` and `is_external` for origin tracking (Epic 3)
+ * - Populates required fields with scraped data or safe defaults
+ * - Sets status = 'active' for display on /aircraft/
+ * - Uses a dedicated system user_id for scraped listings (Epic 3.3)
+ *
+ * Required NOT NULL columns: headline, model, year, registration, serial_number,
+ *   location, price, currency, description, contact_name, contact_email, contact_phone
+ */
+export async function upsertAircraftListing(
+  listing: ParsedAircraftListing,
+  systemUserId: string
+): Promise<"inserted" | "updated" | "skipped"> {
+  // Check if listing already exists by source_url + source_id
+  const { data: existing } = await supabase
+    .from("aircraft_listings")
+    .select("id, updated_at")
+    .eq("source_url", listing.sourceId)
+    .maybeSingle();
+
+  const record = mapToAircraftRow(listing, systemUserId);
+
+  if (existing) {
+    // Update existing record
+    const { error } = await supabase
+      .from("aircraft_listings")
+      .update({ ...record, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+
+    if (error) {
+      logger.error("Failed to update aircraft listing", {
+        sourceId: listing.sourceId,
+        error: error.message,
+      });
+      return "skipped";
+    }
+    logger.debug("Updated aircraft listing", { sourceId: listing.sourceId });
+    return "updated";
+  }
+
+  // Insert new record
+  const { error } = await supabase
+    .from("aircraft_listings")
+    .insert(record);
+
+  if (error) {
+    logger.error("Failed to insert aircraft listing", {
+      sourceId: listing.sourceId,
+      error: error.message,
+    });
+    return "skipped";
+  }
+  logger.debug("Inserted aircraft listing", { sourceId: listing.sourceId });
+  return "inserted";
+}
+
+function mapToAircraftRow(listing: ParsedAircraftListing, systemUserId: string) {
+  return {
+    // Required fields
+    headline: listing.title,
+    headline_de: listing.title,
+    model: listing.title, // Best approximation from unstructured data
+    year: listing.year ?? 0,
+    registration: "N/A", // Not available in source
+    serial_number: "N/A", // Not available in source
+    location: listing.location ?? "Deutschland",
+    price: listing.price ?? 0,
+    currency: config.defaultCurrency,
+    price_negotiable: listing.priceNegotiable,
+    description: listing.description,
+    description_de: listing.description,
+    contact_name: listing.contactName ?? "Siehe Originalanzeige",
+    contact_email: listing.contactEmail ?? "noreply@trade.aero",
+    contact_phone: listing.contactPhone ?? "",
+    agree_to_terms: true,
+
+    // Ownership & origin (Epic 3)
+    user_id: systemUserId,
+    source_name: listing.sourceName,
+    source_url: listing.sourceId,
+    is_external: true,
+
+    // Status
+    status: "active",
+    country: config.defaultCountry,
+
+    // Specs (when available)
+    total_time: listing.totalTime,
+    max_takeoff_weight: listing.mtow?.toString() ?? null,
+    max_takeoff_weight_unit: listing.mtow ? "kg" : null,
+    engine_type_name: listing.engine,
+    last_annual_inspection: listing.annualInspection,
+
+    // Images as JSONB array [{url, alt}]
+    images: listing.imageUrls.map((url) => ({
+      url,
+      alt: listing.title,
+    })),
+
+    // Auto-translate disabled for scraped content (already in German)
+    auto_translate: false,
+    headline_auto_translate: false,
+  };
+}
