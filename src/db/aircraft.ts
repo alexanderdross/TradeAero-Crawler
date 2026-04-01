@@ -311,6 +311,7 @@ export async function upsertAircraftListing(
     const updateFields: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(enriched)) {
       if (/^(headline|description|slug)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
+      if (key === "slug") continue; // Keep DB-generated slug
       if (key === "images" && freshImages.length === 0) continue;
       updateFields[key] = value;
     }
@@ -339,15 +340,46 @@ export async function upsertAircraftListing(
     record = applyReferenceSpecs(record, refSpecs) as typeof record;
   }
 
-  const { error } = await supabase
+  // Remove slug fields — let DB trigger generate slug + listing_number on INSERT
+  const { slug: _slug, ...insertRecord } = record;
+  // Also remove slug_XX fields — we'll regenerate after we get listing_number
+  const cleanInsert: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(insertRecord)) {
+    if (/^slug_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
+    cleanInsert[key] = value;
+  }
+
+  const { data: inserted, error } = await supabase
     .from("aircraft_listings")
-    .insert(record);
+    .insert(cleanInsert)
+    .select("id, slug, listing_number")
+    .single();
 
   if (error) {
     logger.error("Failed to insert aircraft listing", { sourceId: listing.sourceId, error: error.message });
     return "skipped";
   }
-  logger.debug("Inserted aircraft listing", { sourceId: listing.sourceId });
+
+  // Generate proper localized slugs using the DB-assigned listing_number
+  const listingNum = inserted.listing_number as number | null;
+  if (listingNum && translations) {
+    const slugUpdate: Record<string, string> = {};
+    if (inserted.slug) slugUpdate.slug_en = inserted.slug;
+
+    for (const lang of LANGS) {
+      if (lang === "en") continue;
+      const headline = (record as Record<string, unknown>)[`headline_${lang}`];
+      if (headline && typeof headline === "string" && headline.trim()) {
+        slugUpdate[`slug_${lang}`] = generateSlug(headline, listingNum);
+      }
+    }
+
+    if (Object.keys(slugUpdate).length > 0) {
+      await supabase.from("aircraft_listings").update(slugUpdate).eq("id", inserted.id);
+    }
+  }
+
+  logger.debug("Inserted aircraft listing", { sourceId: listing.sourceId, listingNumber: listingNum });
 
   // Log draft listings for admin review
   if (manufacturer.confidence === "low") {
