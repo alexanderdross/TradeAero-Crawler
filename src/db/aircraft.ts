@@ -395,6 +395,17 @@ export async function upsertAircraftListing(
   return "inserted";
 }
 
+/**
+ * Strip date prefix from title for use as headline and slug.
+ * "17.02.2025 Ultralight Glider AL12..." → "Ultralight Glider AL12..."
+ * "Update 22.06.2025 Pioneer 300..." → "Pioneer 300..."
+ */
+function stripDatePrefix(title: string): string {
+  return title
+    .replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "")
+    .trim();
+}
+
 async function mapToAircraftRow(
   listing: ParsedAircraftListing,
   systemUserId: string,
@@ -402,26 +413,28 @@ async function mapToAircraftRow(
   translations: TranslationResult | null,
   manufacturer: ManufacturerMatch
 ) {
-  const localeFields = buildLocaleFields(listing.title, listing.description, translations);
+  // Clean headline: strip date prefix for display and slug
+  const cleanHeadline = stripDatePrefix(listing.title);
+  const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
   const categoryId = detectCategoryId(listing.title, listing.description);
   const seats = detectSeats(listing.title, listing.description);
-
-  // Build the original listing URL for seller info
-  // sourceId format: "pageUrl#index@date" — extract the page URL
   const originalUrl = listing.sourceUrl;
 
+  // Price logic: null = price on request, 0 = also treated as null
+  const hasValidPrice = listing.price !== null && listing.price > 0;
+
   return {
-    headline: listing.title,
+    headline: cleanHeadline,
     model,
     year: listing.year!,
     registration: "N/A",
     serial_number: "N/A",
     location: listing.location ?? "Germany",
-    price: listing.price && listing.price > 0 ? listing.price : null,
+    price: hasValidPrice ? listing.price : null,
     currency: config.defaultCurrency,
-    price_negotiable: !listing.price || listing.price <= 0 ? true : listing.priceNegotiable,
+    price_negotiable: hasValidPrice ? listing.priceNegotiable : false,
     description: listing.description,
 
     // Seller info — show source name and link to original
@@ -453,7 +466,7 @@ async function mapToAircraftRow(
     // All 14 locale columns
     ...localeFields,
 
-    slug: generateSlug(listing.title),
+    slug: generateSlug(cleanHeadline),
 
     // Ownership & origin
     user_id: systemUserId,
@@ -461,12 +474,12 @@ async function mapToAircraftRow(
     source_url: listing.sourceId,
     is_external: true,
 
-    // Low-confidence manufacturer → draft (needs admin review before publishing)
-    status: manufacturer.confidence === "low" ? "draft" : "active",
+    // Status: draft if no images, unknown manufacturer, or no valid price
+    status: (uploadedImages.length === 0 || manufacturer.confidence === "low") ? "draft" : "active",
     country: "Germany",
 
     // Specs
-    total_time: listing.totalTime,
+    total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
     max_takeoff_weight: listing.mtow?.toString() ?? null,
     max_takeoff_weight_unit: listing.mtow ? "kg" : null,
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
