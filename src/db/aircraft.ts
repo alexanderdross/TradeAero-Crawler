@@ -112,9 +112,8 @@ function detectSeats(title: string, description: string): string | null {
   const match = text.match(/(\d)\s*(?:Sitz|Sitzer|seats?|Plätze|sitzig)/i);
   if (match) return match[1];
 
-  // Default for ultralights: 2 seats
-  if (/UL|ultraleicht|ultralight|LSA/i.test(text)) return "2";
-  return null;
+  // Default for ULs / Microlights: 2 seats
+  return "2";
 }
 
 /**
@@ -231,8 +230,8 @@ async function mapToAircraftRow(
     // Seats
     seats,
 
-    // Fuel type (default for ultralights)
-    fuel_type: listing.engine?.toLowerCase().includes("rotax") ? "MOGAS / AVGAS" : null,
+    // Fuel type: Rotax engines always use MOGAS
+    fuel_type: listing.engine?.toLowerCase().includes("rotax") ? "MOGAS" : null,
 
     // All 14 locale columns
     ...localeFields,
