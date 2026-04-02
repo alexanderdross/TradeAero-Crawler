@@ -7,6 +7,7 @@ import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import { lookupReferenceSpecs, applyReferenceSpecs } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
+import { stripTitleDatePrefix } from "../parsers/shared.js";
 
 /**
  * Known manufacturer names → their aircraft_manufacturers.id in the DB.
@@ -173,10 +174,7 @@ async function createManufacturer(name: string): Promise<number> {
  * Goal: "21.11.2025 Dynamic WT-9 mit Rotax 915..." → "WT-9"
  */
 function extractModel(title: string, manufacturerName: string): string {
-  // Remove date prefix like "21.11.2025 " or "Update 22.06.2025 "
-  let cleaned = title
-    .replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "")
-    .trim();
+  let cleaned = stripTitleDatePrefix(title);
 
   // Remove manufacturer name to isolate model
   const mfgIdx = cleaned.toLowerCase().indexOf(manufacturerName.toLowerCase());
@@ -527,17 +525,6 @@ export async function upsertAircraftListing(
   return "inserted";
 }
 
-/**
- * Strip date prefix from title for use as headline and slug.
- * "17.02.2025 Ultralight Glider AL12..." → "Ultralight Glider AL12..."
- * "Update 22.06.2025 Pioneer 300..." → "Pioneer 300..."
- */
-function stripDatePrefix(title: string): string {
-  return title
-    .replace(/^(?:update\s+)?\d{1,2}\.\d{2}\.\d{4}\s*/i, "")
-    .trim();
-}
-
 async function mapToAircraftRow(
   listing: ParsedAircraftListing,
   systemUserId: string,
@@ -546,7 +533,7 @@ async function mapToAircraftRow(
   manufacturer: ManufacturerMatch
 ) {
   // Clean headline: strip date prefix for display and slug
-  const cleanHeadline = stripDatePrefix(listing.title);
+  const cleanHeadline = stripTitleDatePrefix(listing.title);
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);

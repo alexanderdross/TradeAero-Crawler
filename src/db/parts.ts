@@ -76,6 +76,20 @@ export async function upsertPartsListing(
   }
 
   // ── INSERT PATH (full pipeline) ──
+
+  // Fix: ensure description is never empty (description_check constraint)
+  listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
+  if (!listing.description || listing.description.length < 10) {
+    listing.description = listing.title;
+  }
+  if (!listing.description || listing.description.trim().length < 10) {
+    listing.description = `${listing.title} — parts listing`.trim();
+    if (listing.description.length < 10) {
+      logger.debug("Skipping parts listing: no valid description or title", { sourceId: listing.sourceId });
+      return "skipped";
+    }
+  }
+
   const images = await uploadImages(listing.imageUrls, listing.title, "parts-images");
   const translations = await translateListing(listing.title, desc, "de");
 
@@ -86,7 +100,9 @@ export async function upsertPartsListing(
     .insert(record);
 
   if (error) {
-    logger.error("Failed to insert parts listing", {
+    // Constraint violations (e.g. description_check) are non-fatal — log as warning and skip
+    const level = error.message?.includes('check constraint') ? 'warn' : 'error';
+    logger[level]("Failed to insert parts listing", {
       sourceId: listing.sourceId,
       error: error.message,
     });
@@ -115,7 +131,7 @@ function mapToPartsRow(
     contact_name: listing.contactName ?? "Siehe Originalanzeige",
     contact_email: listing.contactEmail ?? "noreply@trade.aero",
     contact_phone: listing.contactPhone ?? "",
-    status: "active",
+    status: (uploadedImages.length === 0) ? "draft" : "active",
 
     // All 14 locale columns
     ...localeFields,

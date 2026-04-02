@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
+import * as cheerio from "cheerio";
 import { parseAircraftPage } from "../parsers/helmut-aircraft.js";
 import { parsePartsPage } from "../parsers/helmut-parts.js";
+import {
+  extractTitle,
+  extractAirfield,
+  extractCity,
+  extractPriceFromText,
+} from "../parsers/shared.js";
 
 const PAGE_URL = "https://www.helmuts-ul-seiten.de/verkauf1a.html";
 const SOURCE_NAME = "helmut-ul";
@@ -329,5 +336,127 @@ describe("parsePartsPage", () => {
     const listings = parsePartsPage(html, PARTS_URL, SOURCE_NAME);
     expect(listings.length).toBe(1);
     expect(listings[0].vatIncluded).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 1: Date prefix stripping (via extractTitle)
+// ---------------------------------------------------------------------------
+describe("extractTitle – date prefix stripping", () => {
+  /** Helper: build a cheerio block with bold text and return the extracted title. */
+  function titleFromBold(boldText: string): string {
+    const html = `<div><b>${boldText}</b></div>`;
+    const $block = cheerio.load(html);
+    const text = $block.text();
+    return extractTitle($block, text);
+  }
+
+  it("strips DD.MM.YYYY prefix", () => {
+    expect(titleFromBold("17.01.2025 Breezer Sport")).toBe("Breezer Sport");
+  });
+
+  it("strips D.MM.YYYY prefix (single-digit day)", () => {
+    expect(titleFromBold("3.04.2025 RANS S-10 Sakota")).toBe("RANS S-10 Sakota");
+  });
+
+  it("strips 'Update DD.MM.YYYY' prefix", () => {
+    expect(titleFromBold("Update 22.06.2025 Pioneer 300")).toBe("Pioneer 300");
+  });
+
+  it("returns title unchanged when there is no date prefix", () => {
+    expect(titleFromBold("Cessna 172 Skyhawk")).toBe("Cessna 172 Skyhawk");
+  });
+
+  it("returns empty string for date-only title", () => {
+    expect(titleFromBold("15.08.2025")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 2: ICAO code extraction
+// ---------------------------------------------------------------------------
+describe("extractAirfield", () => {
+  it("extracts airfield name and ICAO from 'Flugplatz Name ICAO'", () => {
+    const result = extractAirfield("Flugplatz Strausberg EDAZ");
+    expect(result.name).toBe("Strausberg");
+    expect(result.icao).toBe("EDAZ");
+  });
+
+  it("extracts ICAO from 'stationiert am ICAO'", () => {
+    const result = extractAirfield("stationiert am EDMT");
+    expect(result.icao).toBe("EDMT");
+  });
+
+  it("extracts airfield name without ICAO", () => {
+    const result = extractAirfield("Heimatflugplatz: Borkenberge");
+    expect(result.name).toBe("Borkenberge");
+    expect(result.icao).toBeNull();
+  });
+
+  it("extracts ICAO when it appears before city name", () => {
+    const result = extractAirfield("LSZB Bern-Belp");
+    expect(result.icao).toBe("LSZB");
+  });
+
+  it("returns nulls when no airfield info present", () => {
+    const result = extractAirfield("Schönes Flugzeug zu verkaufen");
+    expect(result.name).toBeNull();
+    expect(result.icao).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 3: City extraction
+// ---------------------------------------------------------------------------
+describe("extractCity", () => {
+  it("extracts city from 'Standort: City'", () => {
+    expect(extractCity("Standort: Augsburg")).toBe("Augsburg");
+  });
+
+  it("extracts city from postal code pattern", () => {
+    expect(extractCity("86150 Augsburg")).toBe("Augsburg");
+  });
+
+  it("extracts city from 'Raum City'", () => {
+    expect(extractCity("Raum Frankfurt")).toBe("Frankfurt");
+  });
+
+  it("returns null for null input", () => {
+    expect(extractCity(null)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 4: Price negotiable detection
+// ---------------------------------------------------------------------------
+describe("extractPriceFromText – negotiable detection", () => {
+  it("detects 'Preis verhandelbar' as negotiable with no amount", () => {
+    const result = extractPriceFromText("Preis verhandelbar");
+    expect(result.amount).toBeNull();
+    expect(result.negotiable).toBe(true);
+  });
+
+  it("detects 'Verhandlungsbasis' as negotiable with no amount", () => {
+    const result = extractPriceFromText("Verhandlungsbasis");
+    expect(result.amount).toBeNull();
+    expect(result.negotiable).toBe(true);
+  });
+
+  it("detects 'Preis auf Anfrage' as negotiable with no amount", () => {
+    const result = extractPriceFromText("Preis auf Anfrage");
+    expect(result.amount).toBeNull();
+    expect(result.negotiable).toBe(true);
+  });
+
+  it("extracts amount and detects VB suffix as negotiable", () => {
+    const result = extractPriceFromText("€35.500 VB");
+    expect(result.amount).toBe(35500);
+    expect(result.negotiable).toBe(true);
+  });
+
+  it("returns no price and not negotiable for unrelated text", () => {
+    const result = extractPriceFromText("No price info here");
+    expect(result.amount).toBeNull();
+    expect(result.negotiable).toBe(false);
   });
 });

@@ -84,7 +84,7 @@ export function extractTitle($block: cheerio.CheerioAPI, text: string): string {
  * "3.04.2025 RANS S-10..." → "RANS S-10..."
  * "Update 22.06.2025 Pioneer 300..." → "Pioneer 300..."
  */
-function stripTitleDatePrefix(title: string): string {
+export function stripTitleDatePrefix(title: string): string {
   return title
     .replace(/^(?:update\s+)?\d{1,2}\.\d{2}\.\d{4}\s*/i, "")
     .trim();
