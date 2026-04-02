@@ -1,8 +1,8 @@
 name: "Crawl Aeromarkt.net"
 
 on:
-  # schedule:
-  #   - cron: "0 8 * * *"  # Disabled: aeromarkt.net is offline (April 2026)
+  schedule:
+    - cron: "0 8 * * *"
   workflow_dispatch:
     inputs:
       target:
