@@ -914,6 +914,85 @@ async function main() {
   }
 
   console.log(`\nDone: ${success} seeded, ${failed} failed, ${MODELS.length - success - failed} skipped`);
+
+  // === SECOND PASS: Fill in skeleton rows (from UGC listings) with null specs ===
+  console.log("\nChecking for skeleton rows with missing specs...\n");
+
+  const { data: skeletons } = await supabase
+    .from("aircraft_reference_specs")
+    .select("id, manufacturer, model, variant")
+    .is("cruise_speed", null)
+    .is("engine_type", null);
+
+  if (skeletons && skeletons.length > 0) {
+    console.log(`Found ${skeletons.length} skeleton rows to fill.\n`);
+    let filled = 0;
+    let fillFailed = 0;
+
+    for (const row of skeletons) {
+      const label = `${row.manufacturer} ${row.model}${row.variant ? ` ${row.variant}` : ""}`;
+
+      try {
+        const response = await anthropic.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1024,
+          temperature: 0,
+          system: SYSTEM_PROMPT,
+          messages: [{
+            role: "user",
+            content: `Aircraft: ${label}\nPlease provide the standard performance specifications.`,
+          }],
+        });
+
+        const text = response.content[0].type === "text" ? response.content[0].text : "";
+        const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        const specs = JSON.parse(jsonStr);
+
+        const { error } = await supabase
+          .from("aircraft_reference_specs")
+          .update({
+            cruise_speed: specs.cruise_speed,
+            max_speed: specs.max_speed,
+            max_range: specs.max_range,
+            service_ceiling: specs.service_ceiling,
+            climb_rate: specs.climb_rate,
+            takeoff_distance: specs.takeoff_distance,
+            landing_distance: specs.landing_distance,
+            fuel_consumption: specs.fuel_consumption,
+            empty_weight: specs.empty_weight,
+            max_takeoff_weight: specs.max_takeoff_weight,
+            max_payload: specs.max_payload,
+            fuel_capacity: specs.fuel_capacity,
+            engine_type: specs.engine_type,
+            engine_power: specs.engine_power,
+            engine_power_unit: "PS",
+            fuel_type: specs.fuel_type,
+            seats: specs.seats ?? "2",
+            source: "claude-haiku",
+            confidence: "high",
+          })
+          .eq("id", row.id);
+
+        if (error) {
+          console.log(`  FAIL ${label}: ${error.message}`);
+          fillFailed++;
+        } else {
+          console.log(`  FILL ${label}`);
+          filled++;
+        }
+
+        await new Promise((r) => setTimeout(r, 200));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`  FAIL ${label}: ${msg}`);
+        fillFailed++;
+      }
+    }
+
+    console.log(`\nSkeleton fill: ${filled} filled, ${fillFailed} failed`);
+  } else {
+    console.log("No skeleton rows found.");
+  }
 }
 
 main().catch(console.error);
