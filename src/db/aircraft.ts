@@ -423,6 +423,52 @@ export async function upsertAircraftListing(
     return "skipped";
   }
 
+  // Cross-source dedup: check if same aircraft exists from a different source
+  // Match by registration (call sign) or serial number — unique per aircraft worldwide
+  if (!existing) {
+    const fullText = `${listing.title} ${listing.description}`;
+    const reg = extractRegistration(fullText);
+    const serial = extractSerialNumber(fullText);
+
+    if (reg && reg !== "N/A") {
+      const { data: dupByReg } = await supabase
+        .from("aircraft_listings")
+        .select("id, source_name")
+        .eq("registration", reg)
+        .neq("source_url", listing.sourceId)
+        .maybeSingle();
+
+      if (dupByReg) {
+        logger.info("Cross-source duplicate found by registration", {
+          registration: reg,
+          sourceId: listing.sourceId,
+          existingSource: dupByReg.source_name,
+          existingId: dupByReg.id,
+        });
+        return "skipped";
+      }
+    }
+
+    if (serial && serial !== "N/A") {
+      const { data: dupBySerial } = await supabase
+        .from("aircraft_listings")
+        .select("id, source_name")
+        .eq("serial_number", serial)
+        .neq("source_url", listing.sourceId)
+        .maybeSingle();
+
+      if (dupBySerial) {
+        logger.info("Cross-source duplicate found by serial number", {
+          serialNumber: serial,
+          sourceId: listing.sourceId,
+          existingSource: dupBySerial.source_name,
+          existingId: dupBySerial.id,
+        });
+        return "skipped";
+      }
+    }
+  }
+
   // Resolve manufacturer (needed for both paths)
   const manufacturer = await resolveManufacturer(listing.title);
 
@@ -583,12 +629,17 @@ async function mapToAircraftRow(
   const contactEmail = listing.contactEmail ?? extractEmailFromText(listing.description);
   const contactPhone = listing.contactPhone ?? extractPhoneFromText(listing.description);
 
+  // Extract registration and serial number from title + description
+  const listingFullText = `${listing.title} ${listing.description}`;
+  const registration = extractRegistration(listingFullText) ?? "N/A";
+  const serialNumber = extractSerialNumber(listingFullText) ?? "N/A";
+
   return {
     headline: cleanHeadline,
     model,
     year: listing.year!,
-    registration: "N/A",
-    serial_number: "N/A",
+    registration,
+    serial_number: serialNumber,
     location: listing.location ?? city ?? "Germany",
     city: city ?? null,
     state: resolveGermanState(city),
@@ -732,6 +783,33 @@ function extractIcaoFromText(text: string): string | null {
 function extractEmailFromText(text: string): string | null {
   const match = text.match(/[\w.-]+@[\w.-]+\.\w{2,}/);
   return match ? match[0] : null;
+}
+
+/**
+ * Extract aircraft registration / call sign from text.
+ * Patterns: D-MSEW (Germany), HB-YGX (Switzerland), OE-ABC (Austria),
+ * N12345A (USA), G-ABCD (UK), F-GHIJ (France), etc.
+ */
+function extractRegistration(text: string): string | null {
+  // European: 1-2 letter country prefix + dash + 2-5 alphanumeric chars
+  const euroMatch = text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
+  if (euroMatch) return euroMatch[1];
+
+  // US N-number: N + 1-5 digits + optional 1-2 letters
+  const usMatch = text.match(/\b(N\d{1,5}[A-Z]{0,2})\b/);
+  if (usMatch) return usMatch[1];
+
+  return null;
+}
+
+/**
+ * Extract serial number / Werk-Nr from text.
+ * Patterns: "Werk Nr. 123", "S/N 12345", "Serial: ABC123"
+ */
+function extractSerialNumber(text: string): string | null {
+  const match =
+    text.match(/(?:Werk[- ]?Nr\.?|S\/N|Serial(?:\s*No\.?)?|Seriennummer)[:\s]*([A-Z0-9][\w-]{1,20})/i);
+  return match ? match[1].trim() : null;
 }
 
 /**
