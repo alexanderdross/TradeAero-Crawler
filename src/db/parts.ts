@@ -38,9 +38,6 @@ export async function upsertPartsListing(
     return "skipped";
   }
 
-  // Ensure description is never empty
-  const desc = listing.description?.trim() || listing.title;
-
   if (existing) {
     // ── UPDATE PATH (fast: skip translation, re-upload external images) ──
     const existingImages = (existing.images as Array<{ url?: string }>) ?? [];
