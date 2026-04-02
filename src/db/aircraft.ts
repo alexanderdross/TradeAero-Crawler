@@ -146,6 +146,11 @@ function extractModel(title: string, manufacturerName: string): string {
   // Clean up trailing punctuation and whitespace
   modelPart = modelPart.replace(/[,;:\-–—]+$/, "").trim();
 
+  // Reject pure numbers (e.g. "47", "120") — these are listing numbers, not model names
+  if (/^\d+$/.test(modelPart)) {
+    modelPart = "";
+  }
+
   // Limit length
   if (modelPart.length > 50) {
     modelPart = modelPart.slice(0, 50).replace(/\s+\S*$/, "").trim();
