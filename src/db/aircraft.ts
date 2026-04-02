@@ -448,7 +448,14 @@ export async function upsertAircraftListing(
     // Enrich with reference specs
     let enriched = record as Record<string, unknown>;
     const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
-    if (refSpecs) enriched = applyReferenceSpecs(enriched, refSpecs);
+    if (refSpecs) {
+      enriched = applyReferenceSpecs(enriched, refSpecs);
+      const refModel = (refSpecs as any).ref_model;
+      const refVariant = (refSpecs as any).ref_variant;
+      if (refModel) {
+        enriched.model = refVariant ? `${refModel} ${refVariant}` : refModel;
+      }
+    }
 
     // Strip locale fields from update to preserve existing translations
     const updateFields: Record<string, unknown> = {};
@@ -481,6 +488,12 @@ export async function upsertAircraftListing(
   const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
   if (refSpecs) {
     record = applyReferenceSpecs(record, refSpecs) as typeof record;
+    // Use clean model name from reference specs if available
+    const refModel = (refSpecs as any).ref_model;
+    const refVariant = (refSpecs as any).ref_variant;
+    if (refModel) {
+      record.model = refVariant ? `${refModel} ${refVariant}` : refModel;
+    }
   }
 
   // Remove slug fields — let DB trigger generate slug + listing_number on INSERT
