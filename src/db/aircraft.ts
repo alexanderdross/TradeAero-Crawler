@@ -27,9 +27,10 @@ async function loadRefSpecManufacturers(): Promise<string[]> {
   const { data } = await (supabase as any)
     .from("aircraft_reference_specs")
     .select("manufacturer");
-  const unique = [...new Set((data ?? []).map((r: any) => r.manufacturer as string))];
+  const raw: string[] = (data ?? []).map((r: any) => r.manufacturer as string).filter(Boolean);
+  const unique = [...new Set(raw)];
   // Sort longest first for better matching (e.g. "Comco Ikarus" before "Ikarus")
-  refSpecManufacturers = unique.sort((a, b) => b.length - a.length);
+  refSpecManufacturers = unique.sort((a: string, b: string) => b.length - a.length);
   return refSpecManufacturers;
 }
 
