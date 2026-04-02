@@ -331,7 +331,7 @@ function detectCategoryName(title: string, description: string, engine: string |
 
   if (sepManufacturers.includes(mfg)) return "Single Engine Piston";
   if (lsaManufacturers.includes(mfg)) return "Ultralight / Light Sport Aircraft (LSA)";
-  if (experimentalManufacturers.includes(mfg)) return "Other";
+  if (experimentalManufacturers.includes(mfg)) return "Experimental / Homebuilt";
 
   // Diamond: depends on model
   if (mfg === "diamond") {
