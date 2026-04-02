@@ -1,6 +1,8 @@
 name: "Seed Aircraft Reference Specs"
 
 on:
+  schedule:
+    - cron: "0 7 * * 0"  # Weekly: Sunday 7 AM UTC — fills skeleton rows from UGC listings
   workflow_dispatch:
 
 env:
