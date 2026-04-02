@@ -541,8 +541,14 @@ async function mapToAircraftRow(
   translations: TranslationResult | null,
   manufacturer: ManufacturerMatch
 ) {
-  // Clean headline: strip date prefix for display and slug
-  const cleanHeadline = stripTitleDatePrefix(listing.title);
+  // Clean headline: strip date prefix and spec keywords for display and slug
+  let cleanHeadline = stripTitleDatePrefix(listing.title);
+  // Truncate at spec keywords — headline should be the aircraft name, not full specs
+  const headlineBreak = /\b(?:Baujahr|Werk\s*Nr|Betriebsstunden|Leermasse|MTOW|Flugstunden|Kennzeichen|Seriennummer|Motor:|TT:|TTSN|Zustand|verkaufe|abzugeben|zu\s+verkaufen)\b/i;
+  const headlineParts = cleanHeadline.split(headlineBreak);
+  if (headlineParts[0] && headlineParts[0].trim().length >= 5) {
+    cleanHeadline = headlineParts[0].trim().replace(/[,;:\-–—]+$/, "").trim();
+  }
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
