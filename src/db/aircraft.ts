@@ -338,13 +338,18 @@ export async function upsertAircraftListing(
   // Fix: ensure description is never empty (description_check constraint)
   // Sanitize first, then check — some descriptions contain only HTML/whitespace
   listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
-  if (listing.description.length < 3) {
+  if (!listing.description || listing.description.length < 10) {
+    // Fallback: use title as description
     listing.description = listing.title;
   }
-  // Final guard: if even title is too short, skip
-  if (!listing.description || listing.description.trim().length < 3) {
-    logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
-    return "skipped";
+  // Final guard: generate a minimal description if title is also too short
+  if (!listing.description || listing.description.trim().length < 10) {
+    listing.description = `${listing.title} — ${listing.year ?? ""}`.trim();
+    // If still too short, skip
+    if (listing.description.length < 10) {
+      logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
+      return "skipped";
+    }
   }
 
   const { data: existing, error: lookupError } = await supabase
@@ -434,7 +439,9 @@ export async function upsertAircraftListing(
     .single();
 
   if (error) {
-    logger.error("Failed to insert aircraft listing", { sourceId: listing.sourceId, error: error.message });
+    // Constraint violations (e.g. description_check) are non-fatal — log as warning and skip
+    const level = error.message?.includes('check constraint') ? 'warn' : 'error';
+    logger[level]("Failed to insert aircraft listing", { sourceId: listing.sourceId, error: error.message });
     return "skipped";
   }
 
