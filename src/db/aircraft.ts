@@ -261,7 +261,7 @@ async function resolveCategoryId(categoryName: string): Promise<number> {
 /**
  * Detect aircraft category name based on engine type, manufacturer, and content.
  *
- * Key rule: Rotax engines → Light Sport Aircraft
+ * Key rule: Rotax engines → Ultralight / Light Sport Aircraft (LSA)
  *          Lycoming/Continental engines → Single Engine Piston
  */
 function detectCategoryName(title: string, description: string, engine: string | null, manufacturer: string): string {
@@ -285,12 +285,12 @@ function detectCategoryName(title: string, description: string, engine: string |
 
   // Jets
   if (/\bjet\b|citation|phenom|learjet|gulfstream|bombardier|challenger|falcon\b|global\s*\d/i.test(text)) {
-    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Very Light Jet";
+    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Light Jet";
     if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return "Light Jet";
     if (/mid.?size|xls|latitude|hawker/i.test(text)) return "Mid-Size Jet";
-    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Super Mid-Size Jet";
+    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Mid-Size Jet";
     if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return "Heavy Jet";
-    if (/ultra.?long|g700|global 7/i.test(text)) return "Ultra Long Range";
+    if (/ultra.?long|g700|global 7/i.test(text)) return "Heavy Jet";
     return "Light Jet";
   }
   if (["cirrus", "eclipse", "hondajet", "embraer", "bombardier", "gulfstream", "dassault", "learjet", "hawker"].includes(mfg)) {
@@ -306,7 +306,7 @@ function detectCategoryName(title: string, description: string, engine: string |
   if (/twin|multi.?engine|seneca|seminole|baron|duchess|navajo|aztec|pa-3[014]|pa-44|cessna 3[0-4]\d|cessna 4[0-2]\d|da42|p68/i.test(text)) return "Multi Engine Piston";
 
   // Engine-based detection (most reliable for piston aircraft)
-  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return "Light Sport Aircraft";
+  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return "Ultralight / Light Sport Aircraft (LSA)";
   if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return "Single Engine Piston";
 
   // Manufacturer-based fallback
@@ -326,7 +326,7 @@ function detectCategoryName(title: string, description: string, engine: string |
     "pitts", "xtremair", "sukhoi", "yakovlev", "cap aviation", "mudry", "nanchang"];
 
   if (sepManufacturers.includes(mfg)) return "Single Engine Piston";
-  if (lsaManufacturers.includes(mfg)) return "Light Sport Aircraft";
+  if (lsaManufacturers.includes(mfg)) return "Ultralight / Light Sport Aircraft (LSA)";
   if (experimentalManufacturers.includes(mfg)) return "Other";
 
   // Diamond: depends on model
@@ -337,7 +337,7 @@ function detectCategoryName(title: string, description: string, engine: string |
   }
 
   // Default for unknown: Light Sport Aircraft (Helmut's site is UL-focused)
-  return "Light Sport Aircraft";
+  return "Ultralight / Light Sport Aircraft (LSA)";
 }
 
 /**

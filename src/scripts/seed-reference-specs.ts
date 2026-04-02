@@ -508,7 +508,7 @@ const MODELS = [
   { manufacturer: "ATR", model: "72-600", variant: null },
 
   // ===== ADDITIONAL JETS (VLJ / LIGHT / MID / HEAVY) =====
-  // Very Light Jet
+  // Light Jet (formerly Very Light Jet)
   { manufacturer: "Eclipse", model: "500", variant: null },
   { manufacturer: "Stratos", model: "714", variant: null },
   // Light Jet
@@ -527,14 +527,14 @@ const MODELS = [
   { manufacturer: "Hawker", model: "800XP", variant: null },
   { manufacturer: "Hawker", model: "900XP", variant: null },
   { manufacturer: "Bombardier", model: "Learjet 60", variant: "XR" },
-  // Super Mid-Size Jet
+  // Mid-Size Jet (formerly Super Mid-Size Jet)
   { manufacturer: "Cessna", model: "Citation X+", variant: null },
   { manufacturer: "Bombardier", model: "Challenger 300", variant: null },
   { manufacturer: "Bombardier", model: "Challenger 604", variant: null },
   { manufacturer: "Bombardier", model: "Challenger 650", variant: null },
   { manufacturer: "Dassault", model: "Falcon 900", variant: "LX" },
   { manufacturer: "Dassault", model: "Falcon 2000", variant: "EX" },
-  // Heavy / Ultra Long Range
+  // Heavy Jet (formerly Heavy / Ultra Long Range)
   { manufacturer: "Gulfstream", model: "G450", variant: null },
   { manufacturer: "Gulfstream", model: "G500", variant: null },
   { manufacturer: "Gulfstream", model: "G600", variant: null },
