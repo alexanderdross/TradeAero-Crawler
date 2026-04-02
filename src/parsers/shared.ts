@@ -62,20 +62,32 @@ export function extractTitle($block: cheerio.CheerioAPI, text: string): string {
   // Try bold text first
   const bold = $block("b, strong").first().text().trim();
   if (bold && bold.length > 3 && bold.length < 200) {
-    return cleanText(bold);
+    return stripTitleDatePrefix(cleanText(bold));
   }
 
   // Try first significant line (after date)
   const lines = text.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 3);
   for (const line of lines) {
     // Skip date-only lines
-    if (/^\d{2}\.\d{2}\.\d{4}$/.test(line)) continue;
+    if (/^\d{1,2}\.\d{2}\.\d{4}$/.test(line)) continue;
     // Skip bullet points
     if (line.startsWith("•")) continue;
-    if (line.length < 200) return line;
+    if (line.length < 200) return stripTitleDatePrefix(line);
   }
 
-  return text.slice(0, 100);
+  return stripTitleDatePrefix(text.slice(0, 100));
+}
+
+/**
+ * Strip leading date prefix from title text.
+ * "17.01.2025 Breezer Sport..." → "Breezer Sport..."
+ * "3.04.2025 RANS S-10..." → "RANS S-10..."
+ * "Update 22.06.2025 Pioneer 300..." → "Pioneer 300..."
+ */
+function stripTitleDatePrefix(title: string): string {
+  return title
+    .replace(/^(?:update\s+)?\d{1,2}\.\d{2}\.\d{4}\s*/i, "")
+    .trim();
 }
 
 /**
@@ -83,6 +95,9 @@ export function extractTitle($block: cheerio.CheerioAPI, text: string): string {
  * Handles German price formats: EUR 8.900,-, Preis: 15000 VB, etc.
  */
 export function extractPriceFromText(text: string): { amount: number | null; negotiable: boolean } {
+  // Detect "price negotiable" phrases (German): Preis verhandelbar, Verhandlungsbasis, VB, auf Anfrage
+  const isNegotiablePhrase = /(?:Preis\s+)?(?:verhandelbar|Verhandlungsbasis|auf\s+Anfrage|nach\s+Vereinbarung)/i.test(text);
+
   // Look for price patterns: €12.500, EUR 8.900,-, Preis: 15000 VB
   const priceMatch =
     text.match(/(?:Preis|€|EUR)\s*:?\s*([\d.,]+)\s*(?:€|EUR)?\s*,?-?\s*(VB|VHB|FP)?/i) ??
@@ -90,10 +105,16 @@ export function extractPriceFromText(text: string): { amount: number | null; neg
     text.match(/([\d.]+)\s*(?:€|EUR)\s*(VB|VHB|FP)?/i);
 
   if (priceMatch) {
-    return parsePrice(`€${priceMatch[1]} ${priceMatch[2] ?? ""}`);
+    const result = parsePrice(`€${priceMatch[1]} ${priceMatch[2] ?? ""}`);
+    // If the amount parsed as 0, treat as no price
+    if (result.amount === 0) {
+      return { amount: null, negotiable: isNegotiablePhrase || result.negotiable };
+    }
+    return { ...result, negotiable: result.negotiable || isNegotiablePhrase };
   }
 
-  return { amount: null, negotiable: true };
+  // No numeric price found — mark negotiable only if text explicitly says so
+  return { amount: null, negotiable: isNegotiablePhrase };
 }
 
 /**
@@ -183,4 +204,50 @@ export function extractLocation(text: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Extract city name from location text.
+ * "Standort: Augsburg" → "Augsburg"
+ * "86150 Augsburg" → "Augsburg"
+ * "Raum Frankfurt" → "Frankfurt"
+ * "Nähe München" → "München"
+ */
+export function extractCity(location: string | null): string | null {
+  if (!location) return null;
+
+  // Strip known prefixes to get city name
+  let city = location
+    .replace(/^(?:Standort|Raum|Region|Nähe)[:\s]*/i, "")
+    .replace(/^\d{5}\s*/, "") // Strip postal code
+    .trim();
+
+  // Take first word/phrase (stop at slash, dash with spaces, or parentheses)
+  city = city.split(/\s*[/()]\s*/)[0].trim();
+
+  // Must be at least 2 chars and start with uppercase
+  if (city.length >= 2 && /^[A-ZÄÖÜ]/.test(city)) {
+    return city;
+  }
+
+  return null;
+}
+
+/**
+ * Extract airfield/airport or ICAO code from listing text.
+ * Matches patterns like "Flugplatz Strausberg", "EDAZ", "Heimatflugplatz: EDMT"
+ */
+export function extractAirfield(text: string): { name: string | null; icao: string | null } {
+  // ICAO code: 4 uppercase letters starting with ED (Germany), LO (Austria), LS (Switzerland)
+  const icaoMatch = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b/);
+  const icao = icaoMatch ? icaoMatch[1] : null;
+
+  // Airfield name patterns
+  const airfieldMatch = text.match(
+    /(?:Flugplatz|Flughafen|Heimatflugplatz|Heimatflughafen|Flugfeld|Sonderlandeplatz|Verkehrslandeplatz|Landeplatz|UL-Gelände|UL-Platz|stationiert\s+(?:in|am|auf))[:\s]*([^\n•,]+)/i
+  );
+
+  const name = airfieldMatch ? cleanText(airfieldMatch[1]).replace(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b\s*/g, "").trim() : null;
+
+  return { name: name || null, icao };
 }

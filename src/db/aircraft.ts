@@ -204,59 +204,112 @@ function extractModel(title: string, manufacturerName: string): string {
 }
 
 /**
- * Detect aircraft category based on engine type, manufacturer, and content.
- *
- * Category IDs from aircraft_categories table:
- *  1=Single Engine Piston, 2=Multi Engine Piston, 9=Turboprop,
- * 10=Helicopter, 11=Light Sport Aircraft, 12=Commercial Airliner, 13=Other
- *
- * Key rule: Rotax engines → Light Sport Aircraft (11)
- *          Lycoming/Continental engines → Single Engine Piston (1)
+ * Category name cache: maps category name → DB id.
+ * Populated on first call to resolveCategoryId().
  */
-function detectCategoryId(title: string, description: string, engine: string | null, manufacturer: string): number {
+let categoryCache: Map<string, number> | null = null;
+
+/**
+ * Resolve a category name to its DB id.
+ * Queries the DB once and caches the mapping.
+ */
+async function resolveCategoryId(categoryName: string): Promise<number> {
+  if (!categoryCache) {
+    categoryCache = new Map();
+    const { data: categories } = await supabase
+      .from("aircraft_categories")
+      .select("id, name");
+    if (categories) {
+      for (const cat of categories) {
+        categoryCache.set(cat.name.toLowerCase(), cat.id);
+      }
+    }
+    logger.debug("Loaded category cache", { count: categoryCache.size });
+  }
+
+  const id = categoryCache.get(categoryName.toLowerCase());
+  if (id !== undefined) return id;
+
+  // Fallback: try to create the category
+  const { data, error } = await supabase
+    .from("aircraft_categories")
+    .insert({ name: categoryName })
+    .select("id")
+    .single();
+
+  if (data) {
+    categoryCache.set(categoryName.toLowerCase(), data.id);
+    logger.info("Created new category", { name: categoryName, id: data.id });
+    return data.id;
+  }
+
+  // If creation fails (e.g., already exists), try to look it up again
+  if (error) {
+    const { data: existing } = await supabase
+      .from("aircraft_categories")
+      .select("id")
+      .eq("name", categoryName)
+      .single();
+    if (existing) {
+      categoryCache.set(categoryName.toLowerCase(), existing.id);
+      return existing.id;
+    }
+  }
+
+  logger.warn("Could not resolve category", { name: categoryName });
+  return 0;
+}
+
+/**
+ * Detect aircraft category name based on engine type, manufacturer, and content.
+ *
+ * Key rule: Rotax engines → Light Sport Aircraft
+ *          Lycoming/Continental engines → Single Engine Piston
+ */
+function detectCategoryName(title: string, description: string, engine: string | null, manufacturer: string): string {
   const text = `${title} ${description} ${engine ?? ""}`.toLowerCase();
   const mfg = manufacturer.toLowerCase();
 
   // Helicopter / Gyrocopter
-  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return 10;
-  if (/hubschrauber|helicopter|heli\b/i.test(text)) return 10;
-  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return 10;
-  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return 10;
+  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return "Helicopter";
+  if (/hubschrauber|helicopter|heli\b/i.test(text)) return "Helicopter";
+  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return "Helicopter";
+  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return "Helicopter";
 
-  // Gliders / Motorgliders → 14
-  if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return 14;
-  if (["stemme", "schempp-hirth", "dg flugzeugbau"].includes(mfg)) return 14;
-  if (mfg === "scheibe") return 14;
+  // Gliders / Motorgliders
+  if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return "Glider";
+  if (["stemme", "schempp-hirth", "dg flugzeugbau"].includes(mfg)) return "Glider";
+  if (mfg === "scheibe") return "Glider";
 
-  // Paramotors, trikes, flex-wing → 15 (Microlight / Flex-Wing)
-  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen|flex.?wing/i.test(text)) return 15;
-  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation"].includes(mfg)) return 15;
+  // Paramotors, trikes, flex-wing
+  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen|flex.?wing/i.test(text)) return "Microlight / Flex-Wing";
+  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation"].includes(mfg)) return "Microlight / Flex-Wing";
 
   // Jets
   if (/\bjet\b|citation|phenom|learjet|gulfstream|bombardier|challenger|falcon\b|global\s*\d/i.test(text)) {
-    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return 3; // Very Light Jet
-    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return 4; // Light Jet
-    if (/mid.?size|xls|latitude|hawker/i.test(text)) return 5; // Mid-Size Jet
-    if (/super mid|longitude|challenger|praetor/i.test(text)) return 6; // Super Mid-Size Jet
-    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return 7; // Heavy Jet
-    if (/ultra.?long|g700|global 7/i.test(text)) return 8; // Ultra Long Range
-    return 4; // Default jet → Light Jet
+    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Very Light Jet";
+    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return "Light Jet";
+    if (/mid.?size|xls|latitude|hawker/i.test(text)) return "Mid-Size Jet";
+    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Super Mid-Size Jet";
+    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return "Heavy Jet";
+    if (/ultra.?long|g700|global 7/i.test(text)) return "Ultra Long Range";
+    return "Light Jet";
   }
   if (["cirrus", "eclipse", "hondajet", "embraer", "bombardier", "gulfstream", "dassault", "learjet", "hawker"].includes(mfg)) {
-    if (mfg === "cirrus" && /sr2[02]/i.test(text)) return 1; // Cirrus SR20/SR22 = Single Engine Piston
-    return 4; // Default for jet manufacturers
+    if (mfg === "cirrus" && /sr2[02]/i.test(text)) return "Single Engine Piston";
+    return "Light Jet";
   }
 
   // Turboprop
-  if (/turboprop|pt6|king air|tbm|pc-12|pc-6|caravan|kodiak|piaggio|dornier|atr/i.test(text)) return 9;
-  if (["daher", "pilatus", "quest", "piaggio", "dornier", "atr", "epic"].includes(mfg)) return 9;
+  if (/turboprop|pt6|king air|tbm|pc-12|pc-6|caravan|kodiak|piaggio|dornier|atr/i.test(text)) return "Turboprop";
+  if (["daher", "pilatus", "quest", "piaggio", "dornier", "atr", "epic"].includes(mfg)) return "Turboprop";
 
   // Multi Engine Piston
-  if (/twin|multi.?engine|seneca|seminole|baron|duchess|navajo|aztec|pa-3[014]|pa-44|cessna 3[0-4]\d|cessna 4[0-2]\d|da42|p68/i.test(text)) return 2;
+  if (/twin|multi.?engine|seneca|seminole|baron|duchess|navajo|aztec|pa-3[014]|pa-44|cessna 3[0-4]\d|cessna 4[0-2]\d|da42|p68/i.test(text)) return "Multi Engine Piston";
 
   // Engine-based detection (most reliable for piston aircraft)
-  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return 11; // Light Sport Aircraft (UL engines)
-  if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return 1; // Single Engine Piston (GA engines)
+  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return "Light Sport Aircraft";
+  if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return "Single Engine Piston";
 
   // Manufacturer-based fallback
   const sepManufacturers = ["cessna", "piper", "beechcraft", "mooney", "grumman", "socata",
@@ -274,19 +327,19 @@ function detectCategoryId(title: string, description: string, engine: string | n
   const experimentalManufacturers = ["vans", "van's", "lancair", "glasair", "murphy",
     "pitts", "xtremair", "sukhoi", "yakovlev", "cap aviation", "mudry", "nanchang"];
 
-  if (sepManufacturers.includes(mfg)) return 1; // Single Engine Piston
-  if (lsaManufacturers.includes(mfg)) return 11; // Light Sport Aircraft
-  if (experimentalManufacturers.includes(mfg)) return 13; // Other (Experimental)
+  if (sepManufacturers.includes(mfg)) return "Single Engine Piston";
+  if (lsaManufacturers.includes(mfg)) return "Light Sport Aircraft";
+  if (experimentalManufacturers.includes(mfg)) return "Other";
 
   // Diamond: depends on model
   if (mfg === "diamond") {
-    if (/da42|da62/i.test(text)) return 2; // Multi Engine
-    if (/hk36|dimona/i.test(text)) return 14; // Glider / motorglider
-    return 1; // DA20, DA40, DA50 = Single Engine Piston
+    if (/da42|da62/i.test(text)) return "Multi Engine Piston";
+    if (/hk36|dimona/i.test(text)) return "Glider";
+    return "Single Engine Piston";
   }
 
   // Default for unknown: Light Sport Aircraft (Helmut's site is UL-focused)
-  return 11;
+  return "Light Sport Aircraft";
 }
 
 /**
@@ -481,7 +534,7 @@ export async function upsertAircraftListing(
  */
 function stripDatePrefix(title: string): string {
   return title
-    .replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "")
+    .replace(/^(?:update\s+)?\d{1,2}\.\d{2}\.\d{4}\s*/i, "")
     .trim();
 }
 
@@ -497,12 +550,23 @@ async function mapToAircraftRow(
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
-  const categoryId = detectCategoryId(listing.title, listing.description, listing.engine, manufacturer.name);
+  const categoryName = detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  const categoryId = await resolveCategoryId(categoryName);
   const seats = detectSeats(listing.title, listing.description);
   const originalUrl = listing.sourceUrl;
 
   // Price logic: null = price on request, 0 = also treated as null
   const hasValidPrice = listing.price !== null && listing.price > 0;
+
+  // Extract city and airfield from description text if not found in structured fields
+  const fullText = `${listing.title} ${listing.description}`;
+  const city = listing.city ?? extractCityFromText(fullText);
+  const airfield = listing.airfieldName ?? extractAirfieldFromText(fullText);
+  const icao = listing.icaoCode ?? extractIcaoFromText(fullText);
+
+  // Contact: use parsed fields, falling back to description text extraction
+  const contactEmail = listing.contactEmail ?? extractEmailFromText(listing.description);
+  const contactPhone = listing.contactPhone ?? extractPhoneFromText(listing.description);
 
   return {
     headline: cleanHeadline,
@@ -510,16 +574,19 @@ async function mapToAircraftRow(
     year: listing.year!,
     registration: "N/A",
     serial_number: "N/A",
-    location: listing.location ?? "Germany",
+    location: listing.location ?? city ?? "Germany",
+    city: city ?? null,
+    state: resolveGermanState(city),
+    country: "Germany",
     price: hasValidPrice ? listing.price : null,
     currency: config.defaultCurrency,
-    price_negotiable: hasValidPrice ? listing.priceNegotiable : false,
+    price_negotiable: listing.priceNegotiable ?? false,
     description: listing.description,
 
     // Seller info — show source name and link to original
     contact_name: `Helmuts UL Seiten`,
-    contact_email: listing.contactEmail ?? "noreply@trade.aero",
-    contact_phone: listing.contactPhone ?? "",
+    contact_email: contactEmail ?? "noreply@trade.aero",
+    contact_phone: contactPhone ?? "",
     website: originalUrl, // Link to original listing page
     company: listing.sourceName,
     agree_to_terms: true,
@@ -553,9 +620,12 @@ async function mapToAircraftRow(
     source_url: listing.sourceId,
     is_external: true,
 
+    // Airfield / homebase
+    homebase: airfield ?? null,
+    icaocode: icao ?? null,
+
     // Status: draft if no images, unknown manufacturer, or no valid price
     status: (uploadedImages.length === 0 || manufacturer.confidence === "low") ? "draft" : "active",
-    country: "Germany",
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
@@ -598,6 +668,120 @@ function enrichImagesWithLocalizedAlt(
   });
 }
 
+
+/**
+ * Extract city name from free text (description, title).
+ * Looks for "Standort:", "Raum", postal codes, or "in <City>" patterns.
+ */
+function extractCityFromText(text: string): string | null {
+  // Structured patterns first
+  const structuredMatch =
+    text.match(/(?:Standort|Raum|Region|Nähe|stationiert\s+(?:in|bei))[:\s]*([A-ZÄÖÜ][a-zäöüß]+(?:\s+[a-zäöüß]+)?)/i) ??
+    text.match(/\b(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]{2,})/); // German postal code + city
+
+  if (structuredMatch) {
+    // For postal code match, city is in group 2; for others, group 1
+    const city = structuredMatch[2] ?? structuredMatch[1];
+    return city.replace(/^(?:Standort|Raum|Region|Nähe)[:\s]*/i, "").trim();
+  }
+
+  return null;
+}
+
+/**
+ * Extract airfield/airport name from free text.
+ */
+function extractAirfieldFromText(text: string): string | null {
+  const match = text.match(
+    /(?:Flugplatz|Flughafen|Heimatflugplatz|Heimatflughafen|Flugfeld|Sonderlandeplatz|Verkehrslandeplatz|Landeplatz|UL-Gelände|UL-Platz|stationiert\s+(?:in|am|auf))[:\s]*([^\n•,.]+)/i
+  );
+  if (match) {
+    // Clean out ICAO codes from the name
+    return match[1].replace(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b\s*/g, "").trim() || null;
+  }
+  return null;
+}
+
+/**
+ * Extract ICAO code from free text.
+ * German ICAO: EDxx, Austrian: LOxx, Swiss: LSxx
+ */
+function extractIcaoFromText(text: string): string | null {
+  const match = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Extract email address from free text (description).
+ */
+function extractEmailFromText(text: string): string | null {
+  const match = text.match(/[\w.-]+@[\w.-]+\.\w{2,}/);
+  return match ? match[0] : null;
+}
+
+/**
+ * Extract phone number from free text (description).
+ */
+function extractPhoneFromText(text: string): string | null {
+  const match = text.match(
+    /(?:Tel\.?|Telefon|Mobil|Handy|Phone|Fon)[:\s]*([\d\s/+()-]{7,20})/i
+  );
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * German city → federal state mapping for common aviation locations.
+ * Used to auto-populate the `state` field when only city is extracted.
+ */
+const GERMAN_CITY_TO_STATE: Record<string, string> = {
+  // Bavaria
+  "münchen": "Bavaria", "munich": "Bavaria", "augsburg": "Bavaria", "nürnberg": "Bavaria",
+  "regensburg": "Bavaria", "würzburg": "Bavaria", "ingolstadt": "Bavaria", "straubing": "Bavaria",
+  "landshut": "Bavaria", "rosenheim": "Bavaria", "kempten": "Bavaria", "memmingen": "Bavaria",
+  "bayreuth": "Bavaria", "bamberg": "Bavaria", "passau": "Bavaria", "erding": "Bavaria",
+  "fürstenfeldbruck": "Bavaria", "jesenwang": "Bavaria", "oberschleißheim": "Bavaria",
+  // Baden-Württemberg
+  "stuttgart": "Baden-Württemberg", "karlsruhe": "Baden-Württemberg", "freiburg": "Baden-Württemberg",
+  "mannheim": "Baden-Württemberg", "heidelberg": "Baden-Württemberg", "ulm": "Baden-Württemberg",
+  "friedrichshafen": "Baden-Württemberg", "donaueschingen": "Baden-Württemberg",
+  // Hesse
+  "frankfurt": "Hesse", "wiesbaden": "Hesse", "kassel": "Hesse", "darmstadt": "Hesse",
+  "gießen": "Hesse", "marburg": "Hesse", "fulda": "Hesse", "egelsbach": "Hesse",
+  // North Rhine-Westphalia
+  "köln": "North Rhine-Westphalia", "düsseldorf": "North Rhine-Westphalia", "dortmund": "North Rhine-Westphalia",
+  "essen": "North Rhine-Westphalia", "bonn": "North Rhine-Westphalia", "münster": "North Rhine-Westphalia",
+  "aachen": "North Rhine-Westphalia", "bielefeld": "North Rhine-Westphalia",
+  // Lower Saxony
+  "hannover": "Lower Saxony", "braunschweig": "Lower Saxony", "osnabrück": "Lower Saxony",
+  "oldenburg": "Lower Saxony", "wolfsburg": "Lower Saxony", "hildesheim": "Lower Saxony",
+  // Schleswig-Holstein
+  "kiel": "Schleswig-Holstein", "lübeck": "Schleswig-Holstein", "flensburg": "Schleswig-Holstein",
+  // Rhineland-Palatinate
+  "mainz": "Rhineland-Palatinate", "koblenz": "Rhineland-Palatinate", "trier": "Rhineland-Palatinate",
+  "speyer": "Rhineland-Palatinate",
+  // Saxony
+  "dresden": "Saxony", "leipzig": "Saxony", "chemnitz": "Saxony",
+  // Brandenburg
+  "potsdam": "Brandenburg", "strausberg": "Brandenburg", "cottbus": "Brandenburg",
+  // Thuringia
+  "erfurt": "Thuringia", "jena": "Thuringia", "weimar": "Thuringia",
+  // Saxony-Anhalt
+  "magdeburg": "Saxony-Anhalt", "halle": "Saxony-Anhalt",
+  // Mecklenburg-Vorpommern
+  "rostock": "Mecklenburg-Vorpommern", "schwerin": "Mecklenburg-Vorpommern",
+  // Saarland
+  "saarbrücken": "Saarland",
+  // City-states
+  "berlin": "Berlin", "hamburg": "Hamburg", "bremen": "Bremen",
+};
+
+/**
+ * Look up the German state for a city name.
+ */
+function resolveGermanState(city: string | null): string | null {
+  if (!city) return null;
+  return GERMAN_CITY_TO_STATE[city.toLowerCase()] ?? null;
+}
 
 function isValidIsoDate(value: string | null | undefined): boolean {
   if (!value) return false;
