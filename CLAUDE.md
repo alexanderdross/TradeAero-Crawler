@@ -178,7 +178,7 @@ From the 12-agent security assessment:
 1. Fetch HTML page (retry 3x, polite 2-3s delay, optional Bright Data proxy)
 2. Parse into blocks (source-specific parser: regex, Cheerio selectors)
 3. Extract fields (title, year, price, engine, location, images, contact)
-4. Validate (year in range, description not empty)
+4. Validate (year in range, description 10+ chars after HTML strip; fallback to title or "Title — Year")
 5. Check dedup (SELECT by source_url unique index)
 6. Resolve manufacturer (DB lookup -> reference_specs -> KNOWN_MANUFACTURERS -> fallback)
 7. Detect category (engine-based: Rotax->LSA, Lycoming->SEP; 15 categories total)
@@ -221,10 +221,12 @@ From the 12-agent security assessment:
 
 - **Price**: `null` for missing (not 0); `price_negotiable` only when VB/VHB explicitly present
 - **TTSN**: `null` when 0 or missing (shows N/A in UI)
+- **Description**: Must be 10+ chars after HTML stripping; falls back to title, then `"Title — Year"`; listing skipped if still too short
 - **Date prefix**: Stripped from headlines and slugs (`17.02.2025 Cessna...` -> `Cessna...`)
 - **Slugs**: DB-generated with `listing_number` suffix on INSERT; localized slugs set after
 - **Listings without images**: Saved as `draft` status
 - **Low confidence manufacturer**: Saved as `draft`, logged to `admin_activity_logs` for review
+- **Constraint violations**: DB check-constraint errors (e.g. `description_check`) logged as WARN, not ERROR; listing gracefully skipped
 
 ## Aircraft Reference Specs Enrichment
 
@@ -339,3 +341,4 @@ Path pattern: `listings/{uuid}.jpg`
 11. **Bright Data proxy**: Configurable per source; Helmut doesn't need it, aircraft24/aeromarkt do
 12. **Confidence-based publishing**: Low confidence manufacturer match -> draft status, needs admin review
 13. **Manufacturer auto-create**: New manufacturers discovered during crawling are created in aircraft_manufacturers table
+14. **Graceful constraint handling**: DB constraint violations (e.g. `description_check`) downgraded from ERROR to WARN, listing skipped without aborting the run
