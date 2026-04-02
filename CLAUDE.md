@@ -259,8 +259,8 @@ Source content is German (de). Claude Haiku translates to all 13 other languages
 | Service | Pricing | Tracked in |
 |---------|---------|------------|
 | Bright Data residential proxy | ~$8.40/GB | `crawler_runs.proxy_bytes_transferred` |
-| Claude Haiku 4.5 (input) | $0.80/MTok | `crawler_runs.translation_input_tokens` |
-| Claude Haiku 4.5 (output) | $4.00/MTok | `crawler_runs.translation_output_tokens` |
+| Claude Haiku 4.5 (input) | $1.00/MTok | `crawler_runs.translation_input_tokens` |
+| Claude Haiku 4.5 (output) | $5.00/MTok | `crawler_runs.translation_output_tokens` |
 
 Costs are displayed in the admin dashboard at `/dashboard/admin/` -> Crawler tab.
 
