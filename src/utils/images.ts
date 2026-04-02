@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import sharp from "sharp";
 import { supabase } from "../db/client.js";
 import { logger } from "./logger.js";
 import { fetchBinary } from "./fetch.js";
@@ -16,17 +17,39 @@ const ALLOWED_IMAGE_DOMAINS = [
   "aeromarkt.net",
 ];
 
+/** URL patterns that indicate ad banners, not listing images */
+const AD_PATTERNS = [
+  /advertisement/i,
+  /banner/i,
+  /sponsor/i,
+  /\bad[_-]?\d/i,
+  /google_ads/i,
+  /doubleclick/i,
+];
+
 /** JPEG magic bytes: FF D8 FF */
 const JPEG_MAGIC = [0xff, 0xd8, 0xff];
 /** PNG magic bytes: 89 50 4E 47 */
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
+/** WebP: starts with RIFF....WEBP */
+const WEBP_RIFF = [0x52, 0x49, 0x46, 0x46];
+const WEBP_MARKER = [0x57, 0x45, 0x42, 0x50];
 
-function isValidImage(buffer: Buffer): boolean {
-  if (buffer.length < 4) return false;
-  return (
-    JPEG_MAGIC.every((b, i) => buffer[i] === b) ||
-    PNG_MAGIC.every((b, i) => buffer[i] === b)
-  );
+type ImageFormat = "jpeg" | "png" | "webp" | null;
+
+function detectFormat(buffer: Buffer): ImageFormat {
+  if (buffer.length < 12) return null;
+  if (JPEG_MAGIC.every((b, i) => buffer[i] === b)) return "jpeg";
+  if (PNG_MAGIC.every((b, i) => buffer[i] === b)) return "png";
+  if (
+    WEBP_RIFF.every((b, i) => buffer[i] === b) &&
+    WEBP_MARKER.every((b, i) => buffer[i + 8] === b)
+  ) return "webp";
+  return null;
+}
+
+function isAdBanner(url: string): boolean {
+  return AD_PATTERNS.some((p) => p.test(url));
 }
 
 function isAllowedDomain(url: string): boolean {
@@ -75,6 +98,12 @@ async function downloadAndUpload(
   bucket: string
 ): Promise<{ url: string; alt_text: string } | null> {
   try {
+    // Skip ad banners
+    if (isAdBanner(sourceUrl)) {
+      logger.debug("Skipped ad banner image", { sourceUrl });
+      return null;
+    }
+
     // SSRF prevention: only allow known source domains (CWE-918)
     if (!isAllowedDomain(sourceUrl)) {
       logger.warn("Blocked image from non-allowed domain", { sourceUrl });
@@ -87,7 +116,7 @@ async function downloadAndUpload(
       return null;
     }
 
-    const { buffer, contentType } = result;
+    let { buffer } = result;
 
     // Size limit — prevent memory exhaustion (CWE-400)
     if (buffer.length > MAX_IMAGE_SIZE) {
@@ -96,12 +125,19 @@ async function downloadAndUpload(
     }
 
     // Magic byte validation — prevent malicious file uploads (CWE-434)
-    if (!isValidImage(buffer)) {
-      logger.warn("Invalid image magic bytes — not JPEG or PNG", { sourceUrl });
+    const format = detectFormat(buffer);
+    if (!format) {
+      logger.debug("Skipped unsupported image format", { sourceUrl });
       return null;
     }
 
-    const ext = contentType.includes("png") ? "png" : "jpg";
+    // Convert WebP → JPEG via sharp
+    if (format === "webp") {
+      buffer = await sharp(buffer).jpeg({ quality: 85 }).toBuffer();
+      logger.debug("Converted WebP to JPEG", { sourceUrl, size: buffer.length });
+    }
+
+    const ext = format === "png" ? "png" : "jpg";
     const mimeType = ext === "png" ? "image/png" : "image/jpeg";
     const fileName = `${randomUUID()}.${ext}`;
     const filePath = `listings/${fileName}`;
