@@ -336,8 +336,15 @@ export async function upsertAircraftListing(
   }
 
   // Fix: ensure description is never empty (description_check constraint)
-  if (!listing.description || listing.description.trim().length < 3) {
+  // Sanitize first, then check — some descriptions contain only HTML/whitespace
+  listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
+  if (listing.description.length < 3) {
     listing.description = listing.title;
+  }
+  // Final guard: if even title is too short, skip
+  if (!listing.description || listing.description.trim().length < 3) {
+    logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
+    return "skipped";
   }
 
   const { data: existing, error: lookupError } = await supabase
