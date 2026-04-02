@@ -94,9 +94,39 @@ Return a JSON object with this exact structure:
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
 
-    // Parse JSON from response (handle potential markdown wrapping)
-    const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(jsonStr);
+    // Parse JSON from response (handle markdown wrapping, truncated output, trailing commas)
+    let jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+    // Fix trailing commas before closing braces/brackets (common LLM issue)
+    jsonStr = jsonStr.replace(/,\s*([\]}])/g, "$1");
+
+    // If JSON is truncated (unterminated string/object), try to repair
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      // Attempt repair: close any unclosed strings and braces
+      let repaired = jsonStr;
+      // Count unbalanced quotes — if odd, add closing quote
+      const quoteCount = (repaired.match(/(?<!\\)"/g) || []).length;
+      if (quoteCount % 2 !== 0) repaired += '"';
+      // Close unclosed braces/brackets
+      const opens = (repaired.match(/\{/g) || []).length;
+      const closes = (repaired.match(/\}/g) || []).length;
+      for (let i = 0; i < opens - closes; i++) repaired += "}";
+      const openBr = (repaired.match(/\[/g) || []).length;
+      const closeBr = (repaired.match(/\]/g) || []).length;
+      for (let i = 0; i < openBr - closeBr; i++) repaired += "]";
+      // Remove trailing commas again after repair
+      repaired = repaired.replace(/,\s*([\]}])/g, "$1");
+      try {
+        parsed = JSON.parse(repaired);
+        logger.debug("Repaired truncated translation JSON");
+      } catch (repairErr) {
+        // Give up — rethrow original error for the outer catch
+        throw new Error(`Translation JSON parse failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)}`);
+      }
+    }
     const translations = parsed.translations as Record<
       string,
       { headline: string; description: string }

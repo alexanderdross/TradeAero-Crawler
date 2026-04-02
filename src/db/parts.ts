@@ -76,8 +76,23 @@ export async function upsertPartsListing(
   }
 
   // ── INSERT PATH (full pipeline) ──
+
+  // Ensure description passes DB constraint (description_check: 10+ chars, non-empty)
+  listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
+  if (!listing.description || listing.description.length < 10) {
+    listing.description = listing.title;
+  }
+  if (!listing.description || listing.description.trim().length < 10) {
+    listing.description = `${listing.title} — parts listing`.trim();
+    if (listing.description.length < 10) {
+      logger.debug("Skipping parts listing: no valid description or title", { sourceId: listing.sourceId });
+      return "skipped";
+    }
+  }
+  const cleanDesc = listing.description;
+
   const images = await uploadImages(listing.imageUrls, listing.title, "parts-images");
-  const translations = await translateListing(listing.title, desc, "de");
+  const translations = await translateListing(listing.title, cleanDesc, "de");
 
   const record = mapToPartsRow(listing, systemUserId, images, translations);
 
@@ -86,7 +101,8 @@ export async function upsertPartsListing(
     .insert(record);
 
   if (error) {
-    logger.error("Failed to insert parts listing", {
+    const level = error.message?.includes("check constraint") ? "warn" : "error";
+    logger[level]("Failed to insert parts listing", {
       sourceId: listing.sourceId,
       error: error.message,
     });

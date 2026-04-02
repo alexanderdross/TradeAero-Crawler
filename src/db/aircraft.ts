@@ -338,11 +338,21 @@ export async function upsertAircraftListing(
   // Fix: ensure description is never empty (description_check constraint)
   // Sanitize first, then check — some descriptions contain only HTML/whitespace
   listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
-  if (listing.description.length < 3) {
+  if (listing.description.length < 10) {
+    // Fallback to title
     listing.description = listing.title;
   }
-  // Final guard: if even title is too short, skip
-  if (!listing.description || listing.description.trim().length < 3) {
+  if (!listing.description || listing.description.trim().length < 10) {
+    // Build rich fallback from available fields
+    const descParts = [listing.title];
+    if (listing.year) descParts.push(`Year: ${listing.year}`);
+    if (listing.engine) descParts.push(`Engine: ${listing.engine}`);
+    if (listing.location) descParts.push(`Location: ${listing.location}`);
+    if (listing.totalTime) descParts.push(`Total Time: ${listing.totalTime}h`);
+    listing.description = descParts.join(". ");
+  }
+  // Final guard: skip if still too short for DB constraint
+  if (!listing.description || listing.description.trim().length < 10) {
     logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
     return "skipped";
   }
