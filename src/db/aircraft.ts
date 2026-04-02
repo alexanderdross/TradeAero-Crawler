@@ -273,10 +273,10 @@ function detectCategoryName(title: string, description: string, engine: string |
   const mfg = manufacturer.toLowerCase();
 
   // Helicopter / Gyrocopter
-  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return "Helicopter";
-  if (/hubschrauber|helicopter|heli\b/i.test(text)) return "Helicopter";
-  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return "Helicopter";
-  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return "Helicopter";
+  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return "Helicopter / Gyrocopter";
+  if (/hubschrauber|helicopter|heli\b/i.test(text)) return "Helicopter / Gyrocopter";
+  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return "Helicopter / Gyrocopter";
+  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return "Helicopter / Gyrocopter";
 
   // Gliders / Motorgliders
   if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return "Glider";
