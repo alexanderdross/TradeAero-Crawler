@@ -3,6 +3,14 @@ import * as cheerio from "cheerio";
 import { parseAircraftPage } from "../parsers/helmut-aircraft.js";
 import { parsePartsPage } from "../parsers/helmut-parts.js";
 import {
+  parseAircraft24IndexPage,
+  parseAircraft24ModelPage,
+} from "../parsers/aircraft24.js";
+import {
+  parseAeromarktAircraftPage,
+  parseAeromarktPartsPage,
+} from "../parsers/aeromarkt.js";
+import {
   extractTitle,
   extractAirfield,
   extractCity,
