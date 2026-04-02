@@ -20,6 +20,8 @@ External aviation marketplace crawler for [TradeAero](https://refactor.trade.aer
 - **Bright Data proxy** support (per-source configurable) for sites with anti-bot protection
 - **Manufacturer auto-creation** from DB, reference specs table, and 100+ known manufacturer names
 - **Confidence-based publishing** -- low confidence matches saved as draft for admin review
+- **Robust description validation** -- strips HTML, requires 10+ chars, generates "Title — Year" fallback, skips if still too short
+- **Graceful constraint handling** -- DB constraint violations downgraded to warnings; listings skipped without aborting the run
 - **Idempotent upserts** -- safe to re-run without creating duplicates
 - **Cost tracking** -- proxy bandwidth and translation token usage per run
 - **Security hardened** -- HTML tag stripping, SSRF prevention, image validation, 10MB size limits, 30s timeouts, LLM output sanitization

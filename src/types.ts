@@ -37,6 +37,12 @@ export interface ParsedAircraftListing {
   priceNegotiable: boolean;
   /** Location / region */
   location: string | null;
+  /** Extracted city name */
+  city: string | null;
+  /** Airfield / airport name */
+  airfieldName: string | null;
+  /** ICAO airport code (e.g., EDAZ) */
+  icaoCode: string | null;
   /** Contact name */
   contactName: string | null;
   /** Contact email (deobfuscated) */

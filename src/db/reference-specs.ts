@@ -108,8 +108,14 @@ export async function lookupReferenceSpecs(
 
   // Require at least model match (score >= 3)
   if (bestScore >= 3 && bestMatch) {
-    logger.debug("Matched reference specs", { title: title.slice(0, 50), score: bestScore });
-    return bestMatch;
+    const matchEntry = cache.find(e => e.specs === bestMatch)!;
+    logger.debug("Matched reference specs", { title: title.slice(0, 50), score: bestScore, model: matchEntry.model });
+    // Attach clean manufacturer/model/variant from reference data
+    const result: Partial<ReferenceSpec> & { ref_manufacturer?: string; ref_model?: string; ref_variant?: string } = { ...bestMatch };
+    result.ref_manufacturer = matchEntry.manufacturer;
+    result.ref_model = matchEntry.model;
+    result.ref_variant = matchEntry.variant || undefined;
+    return result;
   }
 
   return null;

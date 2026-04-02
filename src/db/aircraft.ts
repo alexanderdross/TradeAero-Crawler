@@ -7,6 +7,7 @@ import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import { lookupReferenceSpecs, applyReferenceSpecs } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
+import { stripTitleDatePrefix } from "../parsers/shared.js";
 
 /**
  * Known manufacturer names → their aircraft_manufacturers.id in the DB.
@@ -121,10 +122,7 @@ async function createManufacturer(name: string): Promise<number> {
  * Goal: "21.11.2025 Dynamic WT-9 mit Rotax 915..." → "WT-9"
  */
 function extractModel(title: string, manufacturerName: string): string {
-  // Remove date prefix like "21.11.2025 " or "Update 22.06.2025 "
-  let cleaned = title
-    .replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "")
-    .trim();
+  let cleaned = stripTitleDatePrefix(title);
 
   // Remove manufacturer name to isolate model
   const mfgIdx = cleaned.toLowerCase().indexOf(manufacturerName.toLowerCase());
@@ -140,6 +138,10 @@ function extractModel(title: string, manufacturerName: string): string {
   const parts = cleaned.split(breakWords);
   let modelPart = (parts[0] ?? cleaned).trim();
 
+  // Remove aircraft registration/call signs (D-MSEW, HB-YGX, OE-ABC, N12345, etc.)
+  modelPart = modelPart.replace(/\b[A-Z]{1,2}-[A-Z]{2,5}\b/g, "").trim();
+  modelPart = modelPart.replace(/\bN\d{1,5}[A-Z]{0,2}\b/g, "").trim(); // US N-numbers
+
   // Clean up trailing punctuation and whitespace
   modelPart = modelPart.replace(/[,;:\-–—]+$/, "").trim();
 
@@ -152,59 +154,112 @@ function extractModel(title: string, manufacturerName: string): string {
 }
 
 /**
- * Detect aircraft category based on engine type, manufacturer, and content.
- *
- * Category IDs from aircraft_categories table:
- *  1=Single Engine Piston, 2=Multi Engine Piston, 9=Turboprop,
- * 10=Helicopter, 11=Light Sport Aircraft, 12=Commercial Airliner, 13=Other
- *
- * Key rule: Rotax engines → Light Sport Aircraft (11)
- *          Lycoming/Continental engines → Single Engine Piston (1)
+ * Category name cache: maps category name → DB id.
+ * Populated on first call to resolveCategoryId().
  */
-function detectCategoryId(title: string, description: string, engine: string | null, manufacturer: string): number {
+let categoryCache: Map<string, number> | null = null;
+
+/**
+ * Resolve a category name to its DB id.
+ * Queries the DB once and caches the mapping.
+ */
+async function resolveCategoryId(categoryName: string): Promise<number> {
+  if (!categoryCache) {
+    categoryCache = new Map();
+    const { data: categories } = await supabase
+      .from("aircraft_categories")
+      .select("id, name");
+    if (categories) {
+      for (const cat of categories) {
+        categoryCache.set(cat.name.toLowerCase(), cat.id);
+      }
+    }
+    logger.debug("Loaded category cache", { count: categoryCache.size });
+  }
+
+  const id = categoryCache.get(categoryName.toLowerCase());
+  if (id !== undefined) return id;
+
+  // Fallback: try to create the category
+  const { data, error } = await supabase
+    .from("aircraft_categories")
+    .insert({ name: categoryName })
+    .select("id")
+    .single();
+
+  if (data) {
+    categoryCache.set(categoryName.toLowerCase(), data.id);
+    logger.info("Created new category", { name: categoryName, id: data.id });
+    return data.id;
+  }
+
+  // If creation fails (e.g., already exists), try to look it up again
+  if (error) {
+    const { data: existing } = await supabase
+      .from("aircraft_categories")
+      .select("id")
+      .eq("name", categoryName)
+      .single();
+    if (existing) {
+      categoryCache.set(categoryName.toLowerCase(), existing.id);
+      return existing.id;
+    }
+  }
+
+  logger.warn("Could not resolve category", { name: categoryName });
+  return 0;
+}
+
+/**
+ * Detect aircraft category name based on engine type, manufacturer, and content.
+ *
+ * Key rule: Rotax engines → Ultralight / Light Sport Aircraft (LSA)
+ *          Lycoming/Continental engines → Single Engine Piston
+ */
+function detectCategoryName(title: string, description: string, engine: string | null, manufacturer: string): string {
   const text = `${title} ${description} ${engine ?? ""}`.toLowerCase();
   const mfg = manufacturer.toLowerCase();
 
   // Helicopter / Gyrocopter
-  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return 10;
-  if (/hubschrauber|helicopter|heli\b/i.test(text)) return 10;
-  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return 10;
-  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return 10;
+  if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return "Helicopter / Gyrocopter";
+  if (/hubschrauber|helicopter|heli\b/i.test(text)) return "Helicopter / Gyrocopter";
+  if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return "Helicopter / Gyrocopter";
+  if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return "Helicopter / Gyrocopter";
 
-  // Gliders / Motorgliders → 14
-  if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return 14;
-  if (["stemme", "schempp-hirth", "dg flugzeugbau"].includes(mfg)) return 14;
-  if (mfg === "scheibe") return 14;
+  // Gliders / Motorgliders
+  if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return "Glider";
+  if (["stemme", "schempp-hirth", "dg flugzeugbau"].includes(mfg)) return "Glider";
+  if (mfg === "scheibe") return "Glider";
 
-  // Paramotors, trikes, flex-wing → 15 (Microlight / Flex-Wing)
-  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen|flex.?wing/i.test(text)) return 15;
-  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation"].includes(mfg)) return 15;
+  // Paramotors, trikes, flex-wing
+  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen|flex.?wing/i.test(text)) return "Microlight / Flex-Wing";
+  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation"].includes(mfg)) return "Microlight / Flex-Wing";
 
   // Jets
   if (/\bjet\b|citation|phenom|learjet|gulfstream|bombardier|challenger|falcon\b|global\s*\d/i.test(text)) {
-    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return 3; // Very Light Jet
-    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return 4; // Light Jet
-    if (/mid.?size|xls|latitude|hawker/i.test(text)) return 5; // Mid-Size Jet
-    if (/super mid|longitude|challenger|praetor/i.test(text)) return 6; // Super Mid-Size Jet
-    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return 7; // Heavy Jet
-    if (/ultra.?long|g700|global 7/i.test(text)) return 8; // Ultra Long Range
-    return 4; // Default jet → Light Jet
+    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Jet";
+    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return "Jet";
+    if (/mid.?size|xls|latitude|hawker/i.test(text)) return "Jet";
+    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Jet";
+    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return "Jet";
+    if (/ultra.?long|g700|global 7/i.test(text)) return "Jet";
+    return "Jet";
   }
   if (["cirrus", "eclipse", "hondajet", "embraer", "bombardier", "gulfstream", "dassault", "learjet", "hawker"].includes(mfg)) {
-    if (mfg === "cirrus" && /sr2[02]/i.test(text)) return 1; // Cirrus SR20/SR22 = Single Engine Piston
-    return 4; // Default for jet manufacturers
+    if (mfg === "cirrus" && /sr2[02]/i.test(text)) return "Single Engine Piston";
+    return "Jet";
   }
 
   // Turboprop
-  if (/turboprop|pt6|king air|tbm|pc-12|pc-6|caravan|kodiak|piaggio|dornier|atr/i.test(text)) return 9;
-  if (["daher", "pilatus", "quest", "piaggio", "dornier", "atr", "epic"].includes(mfg)) return 9;
+  if (/turboprop|pt6|king air|tbm|pc-12|pc-6|caravan|kodiak|piaggio|dornier|atr/i.test(text)) return "Turboprop";
+  if (["daher", "pilatus", "quest", "piaggio", "dornier", "atr", "epic"].includes(mfg)) return "Turboprop";
 
   // Multi Engine Piston
-  if (/twin|multi.?engine|seneca|seminole|baron|duchess|navajo|aztec|pa-3[014]|pa-44|cessna 3[0-4]\d|cessna 4[0-2]\d|da42|p68/i.test(text)) return 2;
+  if (/twin|multi.?engine|seneca|seminole|baron|duchess|navajo|aztec|pa-3[014]|pa-44|cessna 3[0-4]\d|cessna 4[0-2]\d|da42|p68/i.test(text)) return "Multi Engine Piston";
 
   // Engine-based detection (most reliable for piston aircraft)
-  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return 11; // Light Sport Aircraft (UL engines)
-  if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return 1; // Single Engine Piston (GA engines)
+  if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return "Ultralight / Light Sport Aircraft (LSA)";
+  if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return "Single Engine Piston";
 
   // Manufacturer-based fallback
   const sepManufacturers = ["cessna", "piper", "beechcraft", "mooney", "grumman", "socata",
@@ -222,19 +277,19 @@ function detectCategoryId(title: string, description: string, engine: string | n
   const experimentalManufacturers = ["vans", "van's", "lancair", "glasair", "murphy",
     "pitts", "xtremair", "sukhoi", "yakovlev", "cap aviation", "mudry", "nanchang"];
 
-  if (sepManufacturers.includes(mfg)) return 1; // Single Engine Piston
-  if (lsaManufacturers.includes(mfg)) return 11; // Light Sport Aircraft
-  if (experimentalManufacturers.includes(mfg)) return 13; // Other (Experimental)
+  if (sepManufacturers.includes(mfg)) return "Single Engine Piston";
+  if (lsaManufacturers.includes(mfg)) return "Ultralight / Light Sport Aircraft (LSA)";
+  if (experimentalManufacturers.includes(mfg)) return "Experimental / Homebuilt";
 
   // Diamond: depends on model
   if (mfg === "diamond") {
-    if (/da42|da62/i.test(text)) return 2; // Multi Engine
-    if (/hk36|dimona/i.test(text)) return 14; // Glider / motorglider
-    return 1; // DA20, DA40, DA50 = Single Engine Piston
+    if (/da42|da62/i.test(text)) return "Multi Engine Piston";
+    if (/hk36|dimona/i.test(text)) return "Glider";
+    return "Single Engine Piston";
   }
 
   // Default for unknown: Light Sport Aircraft (Helmut's site is UL-focused)
-  return 11;
+  return "Ultralight / Light Sport Aircraft (LSA)";
 }
 
 /**
@@ -287,11 +342,9 @@ export async function upsertAircraftListing(
   // Sanitize first, then check — some descriptions contain only HTML/whitespace
   listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
   if (listing.description.length < 10) {
-    // Fallback to title
     listing.description = listing.title;
   }
   if (!listing.description || listing.description.trim().length < 10) {
-    // Build rich fallback from available fields
     const descParts = [listing.title];
     if (listing.year) descParts.push(`Year: ${listing.year}`);
     if (listing.engine) descParts.push(`Engine: ${listing.engine}`);
@@ -299,7 +352,6 @@ export async function upsertAircraftListing(
     if (listing.totalTime) descParts.push(`Total Time: ${listing.totalTime}h`);
     listing.description = descParts.join(". ");
   }
-  // Final guard: skip if still too short for DB constraint
   if (!listing.description || listing.description.trim().length < 10) {
     logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
     return "skipped";
@@ -314,6 +366,52 @@ export async function upsertAircraftListing(
   if (lookupError) {
     logger.error("Dedup lookup failed", { sourceId: listing.sourceId, error: lookupError.message });
     return "skipped";
+  }
+
+  // Cross-source dedup: check if same aircraft exists from a different source
+  // Match by registration (call sign) or serial number — unique per aircraft worldwide
+  if (!existing) {
+    const fullText = `${listing.title} ${listing.description}`;
+    const reg = extractRegistration(fullText);
+    const serial = extractSerialNumber(fullText);
+
+    if (reg && reg !== "N/A") {
+      const { data: dupByReg } = await supabase
+        .from("aircraft_listings")
+        .select("id, source_name")
+        .eq("registration", reg)
+        .neq("source_url", listing.sourceId)
+        .maybeSingle();
+
+      if (dupByReg) {
+        logger.info("Cross-source duplicate found by registration", {
+          registration: reg,
+          sourceId: listing.sourceId,
+          existingSource: dupByReg.source_name,
+          existingId: dupByReg.id,
+        });
+        return "skipped";
+      }
+    }
+
+    if (serial && serial !== "N/A") {
+      const { data: dupBySerial } = await supabase
+        .from("aircraft_listings")
+        .select("id, source_name")
+        .eq("serial_number", serial)
+        .neq("source_url", listing.sourceId)
+        .maybeSingle();
+
+      if (dupBySerial) {
+        logger.info("Cross-source duplicate found by serial number", {
+          serialNumber: serial,
+          sourceId: listing.sourceId,
+          existingSource: dupBySerial.source_name,
+          existingId: dupBySerial.id,
+        });
+        return "skipped";
+      }
+    }
   }
 
   // Resolve manufacturer (needed for both paths)
@@ -341,7 +439,14 @@ export async function upsertAircraftListing(
     // Enrich with reference specs
     let enriched = record as Record<string, unknown>;
     const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
-    if (refSpecs) enriched = applyReferenceSpecs(enriched, refSpecs);
+    if (refSpecs) {
+      enriched = applyReferenceSpecs(enriched, refSpecs);
+      const refModel = (refSpecs as any).ref_model;
+      const refVariant = (refSpecs as any).ref_variant;
+      if (refModel) {
+        enriched.model = refVariant ? `${refModel} ${refVariant}` : refModel;
+      }
+    }
 
     // Strip locale fields from update to preserve existing translations
     const updateFields: Record<string, unknown> = {};
@@ -374,6 +479,12 @@ export async function upsertAircraftListing(
   const refSpecs = await lookupReferenceSpecs(listing.title, listing.description, listing.engine);
   if (refSpecs) {
     record = applyReferenceSpecs(record, refSpecs) as typeof record;
+    // Use clean model name from reference specs if available
+    const refModel = (refSpecs as any).ref_model;
+    const refVariant = (refSpecs as any).ref_variant;
+    if (refModel) {
+      record.model = refVariant ? `${refModel} ${refVariant}` : refModel;
+    }
   }
 
   // Remove slug fields — let DB trigger generate slug + listing_number on INSERT
@@ -392,7 +503,9 @@ export async function upsertAircraftListing(
     .single();
 
   if (error) {
-    logger.error("Failed to insert aircraft listing", { sourceId: listing.sourceId, error: error.message });
+    // Constraint violations (e.g. description_check) are non-fatal — log as warning and skip
+    const level = error.message?.includes('check constraint') ? 'warn' : 'error';
+    logger[level]("Failed to insert aircraft listing", { sourceId: listing.sourceId, error: error.message });
     return "skipped";
   }
 
@@ -425,17 +538,6 @@ export async function upsertAircraftListing(
   return "inserted";
 }
 
-/**
- * Strip date prefix from title for use as headline and slug.
- * "17.02.2025 Ultralight Glider AL12..." → "Ultralight Glider AL12..."
- * "Update 22.06.2025 Pioneer 300..." → "Pioneer 300..."
- */
-function stripDatePrefix(title: string): string {
-  return title
-    .replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "")
-    .trim();
-}
-
 async function mapToAircraftRow(
   listing: ParsedAircraftListing,
   systemUserId: string,
@@ -443,34 +545,59 @@ async function mapToAircraftRow(
   translations: TranslationResult | null,
   manufacturer: ManufacturerMatch
 ) {
-  // Clean headline: strip date prefix for display and slug
-  const cleanHeadline = stripDatePrefix(listing.title);
+  // Clean headline: strip date prefix and spec keywords for display and slug
+  let cleanHeadline = stripTitleDatePrefix(listing.title);
+  // Truncate at spec keywords — headline should be the aircraft name, not full specs
+  const headlineBreak = /\b(?:Baujahr|Werk\s*Nr|Betriebsstunden|Leermasse|MTOW|Flugstunden|Kennzeichen|Seriennummer|Motor:|TT:|TTSN|Zustand|verkaufe|abzugeben|zu\s+verkaufen)\b/i;
+  const headlineParts = cleanHeadline.split(headlineBreak);
+  if (headlineParts[0] && headlineParts[0].trim().length >= 5) {
+    cleanHeadline = headlineParts[0].trim().replace(/[,;:\-–—]+$/, "").trim();
+  }
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
-  const categoryId = detectCategoryId(listing.title, listing.description, listing.engine, manufacturer.name);
+  const categoryName = detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  const categoryId = await resolveCategoryId(categoryName);
   const seats = detectSeats(listing.title, listing.description);
   const originalUrl = listing.sourceUrl;
 
   // Price logic: null = price on request, 0 = also treated as null
   const hasValidPrice = listing.price !== null && listing.price > 0;
 
+  // Extract city and airfield from description text if not found in structured fields
+  const fullText = `${listing.title} ${listing.description}`;
+  const city = listing.city ?? extractCityFromText(fullText);
+  const airfield = listing.airfieldName ?? extractAirfieldFromText(fullText);
+  const icao = listing.icaoCode ?? extractIcaoFromText(fullText);
+
+  // Contact: use parsed fields, falling back to description text extraction
+  const contactEmail = listing.contactEmail ?? extractEmailFromText(listing.description);
+  const contactPhone = listing.contactPhone ?? extractPhoneFromText(listing.description);
+
+  // Extract registration and serial number from title + description
+  const listingFullText = `${listing.title} ${listing.description}`;
+  const registration = extractRegistration(listingFullText) ?? "N/A";
+  const serialNumber = extractSerialNumber(listingFullText) ?? "N/A";
+
   return {
     headline: cleanHeadline,
     model,
     year: listing.year!,
-    registration: "N/A",
-    serial_number: "N/A",
-    location: listing.location ?? "Germany",
+    registration,
+    serial_number: serialNumber,
+    location: listing.location ?? city ?? "Germany",
+    city: city ?? null,
+    state: resolveGermanState(city),
+    country: "Germany",
     price: hasValidPrice ? listing.price : null,
     currency: config.defaultCurrency,
-    price_negotiable: hasValidPrice ? listing.priceNegotiable : false,
+    price_negotiable: listing.priceNegotiable ?? false,
     description: listing.description,
 
     // Seller info — show source name and link to original
     contact_name: `Helmuts UL Seiten`,
-    contact_email: listing.contactEmail ?? "noreply@trade.aero",
-    contact_phone: listing.contactPhone ?? "",
+    contact_email: contactEmail ?? "noreply@trade.aero",
+    contact_phone: contactPhone ?? "",
     website: originalUrl, // Link to original listing page
     company: listing.sourceName,
     agree_to_terms: true,
@@ -504,9 +631,12 @@ async function mapToAircraftRow(
     source_url: listing.sourceId,
     is_external: true,
 
+    // Airfield / homebase
+    homebase: airfield ?? null,
+    icaocode: icao ?? null,
+
     // Status: draft if no images, unknown manufacturer, or no valid price
     status: (uploadedImages.length === 0 || manufacturer.confidence === "low") ? "draft" : "active",
-    country: "Germany",
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
@@ -549,6 +679,147 @@ function enrichImagesWithLocalizedAlt(
   });
 }
 
+
+/**
+ * Extract city name from free text (description, title).
+ * Looks for "Standort:", "Raum", postal codes, or "in <City>" patterns.
+ */
+function extractCityFromText(text: string): string | null {
+  // Structured patterns first
+  const structuredMatch =
+    text.match(/(?:Standort|Raum|Region|Nähe|stationiert\s+(?:in|bei))[:\s]*([A-ZÄÖÜ][a-zäöüß]+(?:\s+[a-zäöüß]+)?)/i) ??
+    text.match(/\b(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]{2,})/); // German postal code + city
+
+  if (structuredMatch) {
+    // For postal code match, city is in group 2; for others, group 1
+    const city = structuredMatch[2] ?? structuredMatch[1];
+    return city.replace(/^(?:Standort|Raum|Region|Nähe)[:\s]*/i, "").trim();
+  }
+
+  return null;
+}
+
+/**
+ * Extract airfield/airport name from free text.
+ */
+function extractAirfieldFromText(text: string): string | null {
+  const match = text.match(
+    /(?:Flugplatz|Flughafen|Heimatflugplatz|Heimatflughafen|Flugfeld|Sonderlandeplatz|Verkehrslandeplatz|Landeplatz|UL-Gelände|UL-Platz|stationiert\s+(?:in|am|auf))[:\s]*([^\n•,.]+)/i
+  );
+  if (match) {
+    // Clean out ICAO codes from the name
+    return match[1].replace(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b\s*/g, "").trim() || null;
+  }
+  return null;
+}
+
+/**
+ * Extract ICAO code from free text.
+ * German ICAO: EDxx, Austrian: LOxx, Swiss: LSxx
+ */
+function extractIcaoFromText(text: string): string | null {
+  const match = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Extract email address from free text (description).
+ */
+function extractEmailFromText(text: string): string | null {
+  const match = text.match(/[\w.-]+@[\w.-]+\.\w{2,}/);
+  return match ? match[0] : null;
+}
+
+/**
+ * Extract aircraft registration / call sign from text.
+ * Patterns: D-MSEW (Germany), HB-YGX (Switzerland), OE-ABC (Austria),
+ * N12345A (USA), G-ABCD (UK), F-GHIJ (France), etc.
+ */
+function extractRegistration(text: string): string | null {
+  // European: 1-2 letter country prefix + dash + 2-5 alphanumeric chars
+  const euroMatch = text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
+  if (euroMatch) return euroMatch[1];
+
+  // US N-number: N + 1-5 digits + optional 1-2 letters
+  const usMatch = text.match(/\b(N\d{1,5}[A-Z]{0,2})\b/);
+  if (usMatch) return usMatch[1];
+
+  return null;
+}
+
+/**
+ * Extract serial number / Werk-Nr from text.
+ * Patterns: "Werk Nr. 123", "S/N 12345", "Serial: ABC123"
+ */
+function extractSerialNumber(text: string): string | null {
+  const match =
+    text.match(/(?:Werk[- ]?Nr\.?|S\/N|Serial(?:\s*No\.?)?|Seriennummer)[:\s]*([A-Z0-9][\w-]{1,20})/i);
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Extract phone number from free text (description).
+ */
+function extractPhoneFromText(text: string): string | null {
+  const match = text.match(
+    /(?:Tel\.?|Telefon|Mobil|Handy|Phone|Fon)[:\s]*([\d\s/+()-]{7,20})/i
+  );
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * German city → federal state mapping for common aviation locations.
+ * Used to auto-populate the `state` field when only city is extracted.
+ */
+const GERMAN_CITY_TO_STATE: Record<string, string> = {
+  // Bavaria
+  "münchen": "Bavaria", "munich": "Bavaria", "augsburg": "Bavaria", "nürnberg": "Bavaria",
+  "regensburg": "Bavaria", "würzburg": "Bavaria", "ingolstadt": "Bavaria", "straubing": "Bavaria",
+  "landshut": "Bavaria", "rosenheim": "Bavaria", "kempten": "Bavaria", "memmingen": "Bavaria",
+  "bayreuth": "Bavaria", "bamberg": "Bavaria", "passau": "Bavaria", "erding": "Bavaria",
+  "fürstenfeldbruck": "Bavaria", "jesenwang": "Bavaria", "oberschleißheim": "Bavaria",
+  // Baden-Württemberg
+  "stuttgart": "Baden-Württemberg", "karlsruhe": "Baden-Württemberg", "freiburg": "Baden-Württemberg",
+  "mannheim": "Baden-Württemberg", "heidelberg": "Baden-Württemberg", "ulm": "Baden-Württemberg",
+  "friedrichshafen": "Baden-Württemberg", "donaueschingen": "Baden-Württemberg",
+  // Hesse
+  "frankfurt": "Hesse", "wiesbaden": "Hesse", "kassel": "Hesse", "darmstadt": "Hesse",
+  "gießen": "Hesse", "marburg": "Hesse", "fulda": "Hesse", "egelsbach": "Hesse",
+  // North Rhine-Westphalia
+  "köln": "North Rhine-Westphalia", "düsseldorf": "North Rhine-Westphalia", "dortmund": "North Rhine-Westphalia",
+  "essen": "North Rhine-Westphalia", "bonn": "North Rhine-Westphalia", "münster": "North Rhine-Westphalia",
+  "aachen": "North Rhine-Westphalia", "bielefeld": "North Rhine-Westphalia",
+  // Lower Saxony
+  "hannover": "Lower Saxony", "braunschweig": "Lower Saxony", "osnabrück": "Lower Saxony",
+  "oldenburg": "Lower Saxony", "wolfsburg": "Lower Saxony", "hildesheim": "Lower Saxony",
+  // Schleswig-Holstein
+  "kiel": "Schleswig-Holstein", "lübeck": "Schleswig-Holstein", "flensburg": "Schleswig-Holstein",
+  // Rhineland-Palatinate
+  "mainz": "Rhineland-Palatinate", "koblenz": "Rhineland-Palatinate", "trier": "Rhineland-Palatinate",
+  "speyer": "Rhineland-Palatinate",
+  // Saxony
+  "dresden": "Saxony", "leipzig": "Saxony", "chemnitz": "Saxony",
+  // Brandenburg
+  "potsdam": "Brandenburg", "strausberg": "Brandenburg", "cottbus": "Brandenburg",
+  // Thuringia
+  "erfurt": "Thuringia", "jena": "Thuringia", "weimar": "Thuringia",
+  // Saxony-Anhalt
+  "magdeburg": "Saxony-Anhalt", "halle": "Saxony-Anhalt",
+  // Mecklenburg-Vorpommern
+  "rostock": "Mecklenburg-Vorpommern", "schwerin": "Mecklenburg-Vorpommern",
+  // Saarland
+  "saarbrücken": "Saarland",
+  // City-states
+  "berlin": "Berlin", "hamburg": "Hamburg", "bremen": "Bremen",
+};
+
+/**
+ * Look up the German state for a city name.
+ */
+function resolveGermanState(city: string | null): string | null {
+  if (!city) return null;
+  return GERMAN_CITY_TO_STATE[city.toLowerCase()] ?? null;
+}
 
 function isValidIsoDate(value: string | null | undefined): boolean {
   if (!value) return false;

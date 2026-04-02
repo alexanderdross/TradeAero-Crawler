@@ -189,6 +189,9 @@ function parseAircraftBlock(
     price,
     priceNegotiable: price === null,
     location: locationMatch ? cleanText(locationMatch[1]) : null,
+    city: null,
+    airfieldName: null,
+    icaoCode: null,
     contactName: null,
     contactEmail: null,
     contactPhone: null,
@@ -217,10 +220,10 @@ function parsePartsBlock(
     if (isNaN(price)) price = null;
   }
 
-  // Categorize based on URL or keywords
+  const urlLower = pageUrl.toLowerCase();
   let category: "avionics" | "engines" | "rescue" | "miscellaneous" = "miscellaneous";
-  if (pageUrl.includes("avionik") || pageUrl.includes("instrumente")) category = "avionics";
-  else if (pageUrl.includes("triebwerk")) category = "engines";
+  if (urlLower.includes("avionik") || urlLower.includes("instrumente")) category = "avionics";
+  else if (urlLower.includes("triebwerk")) category = "engines";
 
   const images: string[] = [];
   const baseUrl = new URL(pageUrl).origin;

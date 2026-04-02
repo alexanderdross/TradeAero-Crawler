@@ -131,6 +131,7 @@ function mapToPartsRow(
     contact_name: listing.contactName ?? "Siehe Originalanzeige",
     contact_email: listing.contactEmail ?? "noreply@trade.aero",
     contact_phone: listing.contactPhone ?? "",
+    // parts_listings constraint only allows: active, paused, expired, deleted
     status: "active",
 
     // All 14 locale columns

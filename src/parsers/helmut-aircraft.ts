@@ -15,6 +15,8 @@ import {
   extractContact,
   extractImages,
   extractLocation,
+  extractCity,
+  extractAirfield,
 } from "./shared.js";
 
 /**
@@ -104,8 +106,10 @@ function parseBlock(
   // Extract description (everything that isn't specs, contact, or price)
   const description = extractDescription(text, title, specs);
 
-  // Extract location
+  // Extract location, city, and airfield
   const location = extractLocation(text);
+  const city = extractCity(location);
+  const airfield = extractAirfield(text);
 
   return {
     sourceId: generateSourceId(pageUrl, index, postedDate ?? undefined),
@@ -124,6 +128,9 @@ function parseBlock(
     price: priceInfo.amount,
     priceNegotiable: priceInfo.negotiable,
     location,
+    city,
+    airfieldName: airfield.name,
+    icaoCode: airfield.icao,
     contactName: contact.name,
     contactEmail: contact.email,
     contactPhone: contact.phone,
