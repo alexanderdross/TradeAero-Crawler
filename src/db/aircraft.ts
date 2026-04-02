@@ -15,56 +15,19 @@ import type { ParsedAircraftListing } from "../types.js";
 let manufacturerCache: Map<string, number> | null = null;
 
 /**
- * Well-known UL/LSA/GA manufacturer names for fuzzy title matching.
- * These are checked against listing titles to identify the manufacturer
- * even if they're not yet in the DB (they'll be auto-created).
+ * Unique manufacturer names from aircraft_reference_specs table (cached).
+ * This is the single source of truth for valid manufacturer names.
+ * No more hardcoded KNOWN_MANUFACTURERS list — reference specs has 610+ models.
  */
-const KNOWN_MANUFACTURERS = [
-  // UL / LSA / Microlight
-  "Dynamic", "Aerospool", "Comco Ikarus", "Ikarus", "Flight Design", "Pipistrel",
-  "Tecnam", "Zlin Savage", "Savage", "AutoGyro", "Aeropilot", "Evektor",
-  "Remos", "Pioneer", "FK Lightplanes", "FK", "Roland", "ICP", "Aeropro",
-  "Eurofox", "FlySynthesis", "TL Ultralight", "DynAero", "Zenair", "Aeroprakt",
-  "BRM Aero", "Bristell", "Vampire", "Fresh Breeze", "Rans", "Air Creation",
-  "Magni", "Celier", "Blackshape", "Tomark", "Shark Aero", "Atec", "Ekolot",
-  "Czech Sport Aircraft", "Sling", "Jabiru", "Corvus", "Alpi Aviation",
-  "SD Planes", "Breezer", "JMB", "Just Aircraft", "Kitfox", "Skyranger",
-  "Scheibe", "Stemme", "DG Flugzeugbau",
-  // SEP / MEP
-  "Cessna", "Piper", "Beechcraft", "Cirrus", "Diamond", "Mooney", "Robin",
-  "Grumman", "Socata", "Daher", "Extra", "Maule", "Aviat", "CubCrafters",
-  "Bellanca", "Lake", "Commander", "Fuji", "Jodel", "Grob", "Zlin",
-  // Turboprop
-  "Pilatus", "Quest", "Piaggio", "Dornier", "ATR",
-  // Jet
-  "Eclipse", "HondaJet", "Embraer", "Bombardier", "Gulfstream", "Dassault",
-  "Learjet", "Hawker",
-  // Helicopter
-  "Robinson", "Airbus Helicopters", "Bell", "Leonardo", "MD Helicopters",
-  "Sikorsky", "Enstrom", "Guimbal", "Schweizer",
-  // Experimental / Aerobatic
-  "Vans", "Van's", "Lancair", "Glasair", "Murphy", "Sonex", "Pitts",
-  "XtremeAir", "Cap Aviation", "Yakovlev", "Sukhoi",
-  // Trike / Paramotor
-  "P&M Aviation", "Cosmos", "Airborne",
-  // Historic / Warbird
-  "North American", "De Havilland", "Stinson", "Luscombe", "Aeronca", "Taylorcraft",
-  // German UL specific
-  "Heller", "Eurostar", "Fascination", "Drachen", "Storch",
-  "Ikarus", "Comco", "Dallach", "Rotorsport", "RotorSchmiede",
-  "ELA", "Trendak", "ArrowCopter",
-];
-
-/** Unique manufacturer names from reference_specs table (cached) */
 let refSpecManufacturers: string[] | null = null;
 
 async function loadRefSpecManufacturers(): Promise<string[]> {
   if (refSpecManufacturers) return refSpecManufacturers;
-  const { data } = await supabase
+  const { data } = await (supabase as any)
     .from("aircraft_reference_specs")
     .select("manufacturer");
-  const unique = [...new Set((data ?? []).map((r) => r.manufacturer as string))];
-  // Sort longest first for better matching
+  const unique = [...new Set((data ?? []).map((r: any) => r.manufacturer as string))];
+  // Sort longest first for better matching (e.g. "Comco Ikarus" before "Ikarus")
   refSpecManufacturers = unique.sort((a, b) => b.length - a.length);
   return refSpecManufacturers;
 }
@@ -78,10 +41,13 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
 
 /**
  * Resolve manufacturer from listing title.
- * 1. Check DB for existing manufacturer match
- * 2. Check KNOWN_MANUFACTURERS list for fuzzy match
- * 3. If found but not in DB → auto-create in aircraft_manufacturers
- * 4. Fallback: extract first significant word and auto-create
+ * Single source of truth: aircraft_reference_specs table (610+ models).
+ *
+ * 1. Check DB manufacturers table (already validated names)
+ * 2. Check reference specs table (clean manufacturer names from curated data)
+ * 3. Fallback → "Other" with LOW confidence (listing saved as draft)
+ *
+ * Never auto-creates junk manufacturers from title words.
  */
 type ManufacturerMatch = { id: number; name: string; confidence: "high" | "medium" | "low" };
 
@@ -90,8 +56,10 @@ async function resolveManufacturer(title: string): Promise<ManufacturerMatch> {
   const titleLower = title.replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "").toLowerCase().trim();
 
   // 1. Check existing DB manufacturers → HIGH confidence
-  for (const [nameLower, id] of mfgMap.entries()) {
-    if (titleLower.includes(nameLower)) {
+  // Sort by name length descending to match "Comco Ikarus" before "Ikarus"
+  const dbEntries = [...mfgMap.entries()].sort((a, b) => b[0].length - a[0].length);
+  for (const [nameLower, id] of dbEntries) {
+    if (nameLower.length >= 3 && titleLower.includes(nameLower)) {
       const properName = [...mfgMap.entries()].find(([k]) => k === nameLower)?.[0] ?? nameLower;
       return { id, name: properName, confidence: "high" };
     }
@@ -100,33 +68,13 @@ async function resolveManufacturer(title: string): Promise<ManufacturerMatch> {
   // 2. Check reference specs table → HIGH confidence
   const refSpecsCache = await loadRefSpecManufacturers();
   for (const refMfg of refSpecsCache) {
-    if (titleLower.includes(refMfg.toLowerCase())) {
+    if (refMfg.length >= 3 && titleLower.includes(refMfg.toLowerCase())) {
       const id = await createManufacturer(refMfg);
       return { id, name: refMfg, confidence: "high" };
     }
   }
 
-  // 3. Check KNOWN_MANUFACTURERS list → MEDIUM confidence
-  const sorted = [...KNOWN_MANUFACTURERS].sort((a, b) => b.length - a.length);
-  for (const knownName of sorted) {
-    if (titleLower.includes(knownName.toLowerCase())) {
-      const id = await createManufacturer(knownName);
-      return { id, name: knownName, confidence: "medium" };
-    }
-  }
-
-  // 4. Fallback: extract from title → LOW confidence (needs admin review)
-  const words = titleLower.split(/\s+/);
-  const skipWords = ["update", "verkaufe", "zu", "verkaufen", "wegen", "abzugeben", "neu", "neuer", "neue", "verkauf", "top", "sehr", "schöne", "schöner"];
-  const firstWord = words.find((w) => w.length > 2 && !/^\d+$/.test(w) && !skipWords.includes(w));
-
-  if (firstWord) {
-    const name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1);
-    const id = await createManufacturer(name);
-    logger.warn("Low-confidence manufacturer extraction — listing saved as draft", { title: title.slice(0, 80), manufacturer: name });
-    return { id, name, confidence: "low" };
-  }
-
+  // 3. No match → "Other" (listing saved as draft for admin review)
   const id = await createManufacturer("Other");
   logger.warn("Could not resolve manufacturer — listing saved as draft", { title: title.slice(0, 80) });
   return { id, name: "Other", confidence: "low" };
