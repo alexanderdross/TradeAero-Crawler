@@ -190,6 +190,10 @@ function extractModel(title: string, manufacturerName: string): string {
   const parts = cleaned.split(breakWords);
   let modelPart = (parts[0] ?? cleaned).trim();
 
+  // Remove aircraft registration/call signs (D-MSEW, HB-YGX, OE-ABC, N12345, etc.)
+  modelPart = modelPart.replace(/\b[A-Z]{1,2}-[A-Z]{2,5}\b/g, "").trim();
+  modelPart = modelPart.replace(/\bN\d{1,5}[A-Z]{0,2}\b/g, "").trim(); // US N-numbers
+
   // Clean up trailing punctuation and whitespace
   modelPart = modelPart.replace(/[,;:\-–—]+$/, "").trim();
 
