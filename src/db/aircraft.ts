@@ -393,9 +393,14 @@ export async function upsertAircraftListing(
     // Fallback: use title as description
     listing.description = listing.title;
   }
-  // Final guard: generate a minimal description if title is also too short
+  // Final guard: generate a rich fallback description from available fields
   if (!listing.description || listing.description.trim().length < 10) {
-    listing.description = `${listing.title} — ${listing.year ?? ""}`.trim();
+    const parts = [listing.title];
+    if (listing.year) parts.push(`Year: ${listing.year}`);
+    if (listing.engine) parts.push(`Engine: ${listing.engine}`);
+    if (listing.location) parts.push(`Location: ${listing.location}`);
+    if (listing.totalTime) parts.push(`Total Time: ${listing.totalTime}h`);
+    listing.description = parts.join(". ");
     // If still too short, skip
     if (listing.description.length < 10) {
       logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
