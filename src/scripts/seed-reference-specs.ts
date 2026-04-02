@@ -623,6 +623,173 @@ const MODELS = [
   { manufacturer: "North American", model: "T-6", variant: "Texan" },
   { manufacturer: "De Havilland", model: "DHC-1", variant: "Chipmunk" },
   { manufacturer: "Scottish Aviation", model: "Bulldog", variant: null },
+
+  // ===== ADDITIONAL POPULAR AIRCRAFT (EXTENDED SEED) =====
+
+  // Cessna high-wing trainers & utility
+  { manufacturer: "Cessna", model: "120", variant: null },
+  { manufacturer: "Cessna", model: "140", variant: null },
+  { manufacturer: "Cessna", model: "150", variant: "Aerobat" },
+  { manufacturer: "Cessna", model: "162", variant: "Skycatcher" },
+  { manufacturer: "Cessna", model: "172", variant: "Skyhawk II" },
+  { manufacturer: "Cessna", model: "172", variant: "RG Cutlass" },
+  { manufacturer: "Cessna", model: "175", variant: "Skylark" },
+  { manufacturer: "Cessna", model: "177", variant: "Cardinal RG" },
+  { manufacturer: "Cessna", model: "182", variant: "Turbo Skylane" },
+  { manufacturer: "Cessna", model: "185", variant: null },
+  { manufacturer: "Cessna", model: "190", variant: null },
+  { manufacturer: "Cessna", model: "206H", variant: "Stationair" },
+  { manufacturer: "Cessna", model: "208", variant: "Caravan EX" },
+
+  // Piper classics & modern
+  { manufacturer: "Piper", model: "PA-15", variant: "Vagabond" },
+  { manufacturer: "Piper", model: "PA-16", variant: "Clipper" },
+  { manufacturer: "Piper", model: "PA-17", variant: "Vagabond" },
+  { manufacturer: "Piper", model: "PA-28", variant: "Cadet" },
+  { manufacturer: "Piper", model: "PA-28", variant: "Dakota" },
+  { manufacturer: "Piper", model: "PA-28", variant: "Turbo Arrow IV" },
+  { manufacturer: "Piper", model: "PA-32", variant: "Cherokee Six" },
+  { manufacturer: "Piper", model: "PA-32R", variant: "Saratoga II HP" },
+  { manufacturer: "Piper", model: "PA-46", variant: "350P" },
+  { manufacturer: "Piper", model: "M350", variant: null },
+  { manufacturer: "Piper", model: "M500", variant: null },
+
+  // Beechcraft additional
+  { manufacturer: "Beechcraft", model: "Bonanza", variant: "S35" },
+  { manufacturer: "Beechcraft", model: "Bonanza", variant: "V35B" },
+  { manufacturer: "Beechcraft", model: "Bonanza", variant: "A36TC" },
+  { manufacturer: "Beechcraft", model: "Bonanza", variant: "B36TC" },
+  { manufacturer: "Beechcraft", model: "Baron", variant: "B55" },
+  { manufacturer: "Beechcraft", model: "Baron", variant: "E55" },
+  { manufacturer: "Beechcraft", model: "T-34", variant: "Mentor" },
+  { manufacturer: "Beechcraft", model: "Starship", variant: null },
+
+  // Mooney additional
+  { manufacturer: "Mooney", model: "M20", variant: "J (201)" },
+  { manufacturer: "Mooney", model: "M20", variant: "K (231)" },
+  { manufacturer: "Mooney", model: "M20", variant: "R (Ovation)" },
+  { manufacturer: "Mooney", model: "M20", variant: "S (Eagle)" },
+  { manufacturer: "Mooney", model: "M20", variant: "TN (Acclaim)" },
+  { manufacturer: "Mooney", model: "M20", variant: "U (Ultra)" },
+
+  // Grumman/American General
+  { manufacturer: "Grumman", model: "AA-5", variant: "Traveler" },
+  { manufacturer: "Grumman", model: "AA-5A", variant: "Cheetah" },
+  { manufacturer: "Grumman", model: "AA-5B", variant: "Tiger" },
+  { manufacturer: "Grumman", model: "AG-5B", variant: "Tiger" },
+
+  // Maule STOL
+  { manufacturer: "Maule", model: "M-4", variant: "Rocket" },
+  { manufacturer: "Maule", model: "M-5", variant: "Lunar Rocket" },
+  { manufacturer: "Maule", model: "M-6", variant: "Super Rocket" },
+  { manufacturer: "Maule", model: "M-7-260C", variant: null },
+  { manufacturer: "Maule", model: "MT-7-260", variant: null },
+
+  // Waco / classic biplanes
+  { manufacturer: "Waco", model: "YMF-5", variant: null },
+  { manufacturer: "Great Lakes", model: "2T-1A-2", variant: null },
+  { manufacturer: "Stearman", model: "PT-17", variant: null },
+
+  // European GA
+  { manufacturer: "Aquila", model: "AT01", variant: "A210" },
+  { manufacturer: "Aquila", model: "AT01", variant: "A211" },
+  { manufacturer: "SIAI-Marchetti", model: "SF260", variant: null },
+  { manufacturer: "Pilatus", model: "P-3", variant: null },
+  { manufacturer: "FFA", model: "AS202", variant: "Bravo" },
+
+  // Warbirds / vintage
+  { manufacturer: "North American", model: "P-51", variant: "Mustang" },
+  { manufacturer: "North American", model: "AT-6", variant: "Texan" },
+  { manufacturer: "De Havilland", model: "DH.82", variant: "Tiger Moth" },
+  { manufacturer: "De Havilland", model: "DHC-2", variant: "Beaver" },
+  { manufacturer: "De Havilland", model: "DHC-3", variant: "Otter" },
+  { manufacturer: "Pilatus", model: "PC-7", variant: null },
+  { manufacturer: "Pilatus", model: "PC-9", variant: null },
+  { manufacturer: "Beechcraft", model: "T-34A", variant: "Mentor" },
+  { manufacturer: "Noorduyn", model: "AT-16", variant: "Harvard" },
+
+  // Amphibians / floatplanes
+  { manufacturer: "Icon", model: "A5", variant: null },
+  { manufacturer: "Progressive Aerodyne", model: "SeaRey", variant: "Elite" },
+  { manufacturer: "Searey", model: "LSX", variant: null },
+  { manufacturer: "Republic", model: "RC-3", variant: "Seabee" },
+  { manufacturer: "Dornier", model: "Seastar", variant: null },
+
+  // Modern LSA additions
+  { manufacturer: "Tecnam", model: "P92", variant: "Tail Dragger" },
+  { manufacturer: "Tecnam", model: "P2002", variant: "JF" },
+  { manufacturer: "Tecnam", model: "P2012", variant: "Traveller" },
+  { manufacturer: "Pipistrel", model: "Virus", variant: "SW 915" },
+  { manufacturer: "Pipistrel", model: "Sinus", variant: "Flex" },
+  { manufacturer: "Flight Design", model: "MC", variant: null },
+  { manufacturer: "Bristell", model: "B23", variant: "Fiti" },
+  { manufacturer: "Bristell", model: "TDO", variant: null },
+
+  // Turboprop additions
+  { manufacturer: "Daher", model: "TBM 700", variant: "N" },
+  { manufacturer: "Daher", model: "TBM 910", variant: null },
+  { manufacturer: "Daher", model: "Kodiak", variant: "100 Series III" },
+  { manufacturer: "Beechcraft", model: "King Air", variant: "B200" },
+  { manufacturer: "Beechcraft", model: "King Air", variant: "F90" },
+  { manufacturer: "Beechcraft", model: "Super King Air", variant: "350i" },
+  { manufacturer: "Cessna", model: "425", variant: "Conquest I" },
+  { manufacturer: "Cessna", model: "441", variant: "Conquest" },
+  { manufacturer: "Mitsubishi", model: "MU-2", variant: null },
+  { manufacturer: "Dornier", model: "228", variant: "NG" },
+  { manufacturer: "De Havilland Canada", model: "DHC-6", variant: "Twin Otter 400" },
+
+  // Jet additions
+  { manufacturer: "Cessna", model: "Citation Bravo", variant: null },
+  { manufacturer: "Cessna", model: "Citation Encore+", variant: null },
+  { manufacturer: "Cessna", model: "Citation V", variant: "Ultra" },
+  { manufacturer: "Cessna", model: "Citation VII", variant: null },
+  { manufacturer: "Bombardier", model: "Learjet 31A", variant: null },
+  { manufacturer: "Bombardier", model: "Learjet 35A", variant: null },
+  { manufacturer: "Bombardier", model: "Learjet 40", variant: "XR" },
+  { manufacturer: "Bombardier", model: "Learjet 55", variant: null },
+  { manufacturer: "Bombardier", model: "Global 5000", variant: null },
+  { manufacturer: "Bombardier", model: "Global 6000", variant: null },
+  { manufacturer: "Bombardier", model: "Global 8000", variant: null },
+  { manufacturer: "Gulfstream", model: "G100", variant: null },
+  { manufacturer: "Gulfstream", model: "G150", variant: null },
+  { manufacturer: "Gulfstream", model: "G200", variant: null },
+  { manufacturer: "Gulfstream", model: "G350", variant: null },
+  { manufacturer: "Gulfstream", model: "G400", variant: null },
+  { manufacturer: "Gulfstream", model: "G800", variant: null },
+  { manufacturer: "Dassault", model: "Falcon 10", variant: null },
+  { manufacturer: "Dassault", model: "Falcon 20", variant: null },
+  { manufacturer: "Dassault", model: "Falcon 50", variant: null },
+  { manufacturer: "Dassault", model: "Falcon 900", variant: "EX" },
+  { manufacturer: "Dassault", model: "Falcon 900", variant: "DX" },
+  { manufacturer: "Embraer", model: "Legacy 650", variant: null },
+  { manufacturer: "Embraer", model: "Legacy 650E", variant: null },
+
+  // Helicopter additions
+  { manufacturer: "Robinson", model: "R22", variant: "Beta II" },
+  { manufacturer: "Robinson", model: "R44", variant: "Raven I" },
+  { manufacturer: "Robinson", model: "R66", variant: "Turbine Marine" },
+  { manufacturer: "Bell", model: "47", variant: null },
+  { manufacturer: "Bell", model: "206L", variant: "LongRanger" },
+  { manufacturer: "Bell", model: "222", variant: null },
+  { manufacturer: "Bell", model: "230", variant: null },
+  { manufacturer: "Bell", model: "412", variant: "EP" },
+  { manufacturer: "Bell", model: "430", variant: null },
+  { manufacturer: "Airbus Helicopters", model: "EC120", variant: "Colibri" },
+  { manufacturer: "Airbus Helicopters", model: "EC130", variant: "T2" },
+  { manufacturer: "Airbus Helicopters", model: "EC135", variant: "P3" },
+  { manufacturer: "Airbus Helicopters", model: "AS350", variant: "B3e" },
+  { manufacturer: "Airbus Helicopters", model: "AS355", variant: "N" },
+  { manufacturer: "Sikorsky", model: "S-76", variant: "C++" },
+  { manufacturer: "Sikorsky", model: "S-76", variant: "B" },
+  { manufacturer: "Sikorsky", model: "S-70", variant: null },
+  { manufacturer: "MD Helicopters", model: "MD 902", variant: "Explorer" },
+  { manufacturer: "MD Helicopters", model: "MD 600N", variant: null },
+
+  // Electric / hybrid (emerging)
+  { manufacturer: "Bye Aerospace", model: "eFlyer 2", variant: null },
+  { manufacturer: "Pipistrel", model: "Velis Electro", variant: "SW 128" },
+  { manufacturer: "Eviation", model: "Alice", variant: null },
+  { manufacturer: "Heart Aerospace", model: "ES-30", variant: null },
 ];
 
 const SYSTEM_PROMPT = `You are an aviation engineer providing accurate aircraft performance specifications.
