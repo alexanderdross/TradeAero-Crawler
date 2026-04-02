@@ -289,17 +289,17 @@ function detectCategoryName(title: string, description: string, engine: string |
 
   // Jets
   if (/\bjet\b|citation|phenom|learjet|gulfstream|bombardier|challenger|falcon\b|global\s*\d/i.test(text)) {
-    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Light Jet";
-    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return "Light Jet";
-    if (/mid.?size|xls|latitude|hawker/i.test(text)) return "Mid-Size Jet";
-    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Mid-Size Jet";
-    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return "Heavy Jet";
-    if (/ultra.?long|g700|global 7/i.test(text)) return "Heavy Jet";
-    return "Light Jet";
+    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Jet";
+    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return "Jet";
+    if (/mid.?size|xls|latitude|hawker/i.test(text)) return "Jet";
+    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Jet";
+    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return "Jet";
+    if (/ultra.?long|g700|global 7/i.test(text)) return "Jet";
+    return "Jet";
   }
   if (["cirrus", "eclipse", "hondajet", "embraer", "bombardier", "gulfstream", "dassault", "learjet", "hawker"].includes(mfg)) {
     if (mfg === "cirrus" && /sr2[02]/i.test(text)) return "Single Engine Piston";
-    return "Light Jet";
+    return "Jet";
   }
 
   // Turboprop
