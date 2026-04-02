@@ -1,5 +1,4 @@
 import { randomUUID } from "crypto";
-import sharp from "sharp";
 import { supabase } from "../db/client.js";
 import { logger } from "./logger.js";
 import { fetchBinary } from "./fetch.js";
@@ -31,24 +30,13 @@ const AD_PATTERNS = [
 const JPEG_MAGIC = [0xff, 0xd8, 0xff];
 /** PNG magic bytes: 89 50 4E 47 */
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
-/** GIF magic bytes: 47 49 46 ("GIF") */
-const GIF_MAGIC = [0x47, 0x49, 0x46];
-/** WebP magic bytes: 52 49 46 46 ... 57 45 42 50 ("RIFF....WEBP") */
-const WEBP_RIFF = [0x52, 0x49, 0x46, 0x46];
-const WEBP_MARKER = [0x57, 0x45, 0x42, 0x50];
 
-type ImageFormat = "jpeg" | "png" | "gif" | "webp" | null;
-
-function detectImageFormat(buffer: Buffer): ImageFormat {
-  if (buffer.length < 12) return null;
-  if (JPEG_MAGIC.every((b, i) => buffer[i] === b)) return "jpeg";
-  if (PNG_MAGIC.every((b, i) => buffer[i] === b)) return "png";
-  if (GIF_MAGIC.every((b, i) => buffer[i] === b)) return "gif";
-  if (
-    WEBP_RIFF.every((b, i) => buffer[i] === b) &&
-    WEBP_MARKER.every((b, i) => buffer[i + 8] === b)
-  ) return "webp";
-  return null;
+function isValidImage(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  return (
+    JPEG_MAGIC.every((b, i) => buffer[i] === b) ||
+    PNG_MAGIC.every((b, i) => buffer[i] === b)
+  );
 }
 
 function isAdBanner(url: string): boolean {
@@ -119,7 +107,7 @@ async function downloadAndUpload(
       return null;
     }
 
-    let { buffer } = result;
+    const { buffer, contentType } = result;
 
     // Size limit — prevent memory exhaustion (CWE-400)
     if (buffer.length > MAX_IMAGE_SIZE) {
@@ -128,27 +116,13 @@ async function downloadAndUpload(
     }
 
     // Magic byte validation — prevent malicious file uploads (CWE-434)
-    const format = detectImageFormat(buffer);
-    if (!format) {
-      logger.warn("Unsupported image format", { sourceUrl });
+    if (!isValidImage(buffer)) {
+      logger.debug("Skipped non-JPEG/PNG image", { sourceUrl });
       return null;
     }
 
-    // Convert GIF and WebP to JPEG for consistency and smaller size
-    let ext = "jpg";
-    let mimeType = "image/jpeg";
-
-    if (format === "png") {
-      ext = "png";
-      mimeType = "image/png";
-    } else if (format === "gif" || format === "webp") {
-      // Convert to JPEG via sharp (first frame for animated GIFs)
-      buffer = await sharp(buffer, { animated: false })
-        .jpeg({ quality: 85 })
-        .toBuffer();
-      logger.debug("Converted image to JPEG", { sourceUrl, from: format, size: buffer.length });
-    }
-
+    const ext = contentType.includes("png") ? "png" : "jpg";
+    const mimeType = ext === "png" ? "image/png" : "image/jpeg";
     const fileName = `${randomUUID()}.${ext}`;
     const filePath = `listings/${fileName}`;
 
