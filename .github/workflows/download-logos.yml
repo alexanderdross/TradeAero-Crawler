@@ -15,8 +15,12 @@ jobs:
       - name: Checkout Crawler
         uses: actions/checkout@v4
 
-      - name: Create logos output directory
-        run: mkdir -p logos
+      - name: Checkout Refactor (for logo output)
+        uses: actions/checkout@v4
+        with:
+          repository: alexanderdross/TradeAero-Refactor
+          path: TradeAero-Refactor
+          token: ${{ secrets.REFACTOR_PAT }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,17 +40,27 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRIGHT_DATA_PROXY_URL: ${{ secrets.BRIGHT_DATA_PROXY_URL }}
-          LOGO_OUTPUT_DIR: ./logos
+          LOGO_OUTPUT_DIR: ./TradeAero-Refactor/public/assets/logos
         run: npx tsx src/scripts/download-logos.ts
 
       - name: List downloaded logos
-        run: ls -la logos/*-logo* 2>/dev/null && echo "---" && ls logos/*-logo* 2>/dev/null | wc -l || echo "No logos found"
+        run: |
+          echo "=== All logos ==="
+          ls -la TradeAero-Refactor/public/assets/logos/*-logo* 2>/dev/null | wc -l
+          echo "=== New/changed files ==="
+          cd TradeAero-Refactor && git status --short public/assets/logos/
 
-      - name: Upload logos as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: manufacturer-logos
-          path: logos/*-logo*
-          retention-days: 90
-          if-no-files-found: warn
+      - name: Commit and push logos to Refactor repo
+        run: |
+          cd TradeAero-Refactor
+          git config user.name "TradeAero Bot"
+          git config user.email "bot@trade.aero"
+          git add public/assets/logos/*-logo*
+          if git diff --cached --quiet; then
+            echo "No new logos to commit"
+          else
+            COUNT=$(git diff --cached --name-only | wc -l)
+            git commit -m "Add ${COUNT} manufacturer logos (auto-downloaded via Bright Data)"
+            git push
+            echo "Pushed ${COUNT} new logos to TradeAero-Refactor"
+          fi
