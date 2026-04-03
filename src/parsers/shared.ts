@@ -194,13 +194,17 @@ export function extractImages($block: cheerio.CheerioAPI, pageUrl: string): stri
  * Looks for patterns like "Standort: ...", "Raum ...", or German postal codes.
  */
 export function extractLocation(text: string): string | null {
-  // Common patterns: "Standort: ...", "Raum ...", "PLZ ...", city names
-  const locationMatch =
-    text.match(/(?:Standort|Raum|Region|Nähe)[:\s]*([^\n•,]+)/i) ??
-    text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+)/); // German postal code + city
+  // Common patterns: "Standort: City", "Raum City", postal code + city
+  const structuredMatch =
+    text.match(/(?:Standort|Raum|Region|Nähe|stationiert\s+(?:in|bei))[:\s]*([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ]?[a-zäöüß]+){0,3})/i);
+  if (structuredMatch) {
+    return cleanText(structuredMatch[1]);
+  }
 
-  if (locationMatch) {
-    return cleanText(locationMatch[0]);
+  // German postal code + city: "86150 Augsburg"
+  const postalMatch = text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ]?[a-zäöüß]+){0,2})/);
+  if (postalMatch) {
+    return cleanText(`${postalMatch[1]} ${postalMatch[2]}`);
   }
 
   return null;

@@ -11,9 +11,9 @@ import { createClient } from "@supabase/supabase-js";
 
 const MODELS = [
   // ===== ULTRALIGHT / LSA / MICROLIGHT =====
-  // Dynamic / Aerospool
-  { manufacturer: "Dynamic", model: "WT-9", variant: "Dynamic" },
-  { manufacturer: "Dynamic", model: "WT-9", variant: "Dynamic Club" },
+  // Aerospool / Dynamic (WT-9 series)
+  { manufacturer: "Aerospool", model: "WT-9", variant: "Dynamic" },
+  { manufacturer: "Aerospool", model: "WT-9", variant: "Dynamic Club" },
   // Comco Ikarus
   { manufacturer: "Comco Ikarus", model: "C42", variant: "B" },
   { manufacturer: "Comco Ikarus", model: "C42", variant: "C" },
