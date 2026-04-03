@@ -2,7 +2,7 @@ name: "Crawl Helmut's UL Seiten"
 
 on:
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * 1,3,5"
   workflow_dispatch:
     inputs:
       target:

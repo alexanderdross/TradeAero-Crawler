@@ -790,6 +790,120 @@ const MODELS = [
   { manufacturer: "Pipistrel", model: "Velis Electro", variant: "SW 128" },
   { manufacturer: "Eviation", model: "Alice", variant: null },
   { manufacturer: "Heart Aerospace", model: "ES-30", variant: null },
+
+  // ===== UL TRIKES / WEIGHT-SHIFT / PARAMOTORS =====
+  // Toni Roth (German trike builder)
+  { manufacturer: "Toni Roth", model: "Carbon Trike", variant: null },
+  // Royal (French trikes)
+  { manufacturer: "Royal", model: "912 ULS", variant: null },
+  { manufacturer: "Royal", model: "912 UL", variant: null },
+  // Take Off (German trikes)
+  { manufacturer: "Take Off", model: "Merlin", variant: "1000" },
+  { manufacturer: "Take Off", model: "Merlin", variant: "1200" },
+  // Eagle (trikes)
+  { manufacturer: "Eagle", model: "Eagle V", variant: "Trike" },
+  // Bautek (German trikes)
+  { manufacturer: "Bautek", model: "Pico", variant: null },
+  { manufacturer: "Bautek", model: "Skycruiser", variant: null },
+  // Diamant (German trikes)
+  { manufacturer: "Diamant", model: "LP Trike", variant: null },
+  // La Mouette (French hang gliders / trikes)
+  { manufacturer: "La Mouette", model: "Samson", variant: null },
+  { manufacturer: "La Mouette", model: "Top", variant: null },
+  // Drachen-Trike builders
+  { manufacturer: "Drachenflieger", model: "Drachen-Trike", variant: null },
+  // SUNFLIGHTCRAFT (paramotors/trikes)
+  { manufacturer: "Sunflightcraft", model: "Airchopper", variant: null },
+  // Aeros (Ukrainian hang gliders / trikes)
+  { manufacturer: "Aeros", model: "Discus", variant: null },
+  { manufacturer: "Aeros", model: "ANT", variant: null },
+  { manufacturer: "Aeros", model: "Combat", variant: null },
+  // Truster (Australian trikes)
+  { manufacturer: "Truster", model: "Thor", variant: null },
+  // APOLLO (trikes/ULs)
+  { manufacturer: "Apollo", model: "Delta Jet", variant: null },
+  { manufacturer: "Apollo", model: "Fox", variant: null },
+  // Air Création (French trikes)
+  { manufacturer: "Air Création", model: "Tanarg", variant: null },
+  { manufacturer: "Air Création", model: "Skypper", variant: null },
+  { manufacturer: "Air Création", model: "iXess", variant: null },
+  // Parazoom / Paramotor brands
+  { manufacturer: "Parazoom", model: "Triostar", variant: null },
+  // XCitor (paramotors)
+  { manufacturer: "XCitor", model: "XC", variant: null },
+
+  // ===== ADDITIONAL GYROCOPTERS =====
+  // Tercel (gyrocopter)
+  { manufacturer: "Tercel", model: "Exclusive", variant: null },
+  // RotorSchmiede (German gyrocopter)
+  { manufacturer: "RotorSchmiede", model: "VA115", variant: null },
+  // Magni (Italian gyrocopter)
+  { manufacturer: "Magni", model: "M16", variant: "Tandem Trainer" },
+  { manufacturer: "Magni", model: "M22", variant: "Voyager" },
+  { manufacturer: "Magni", model: "M24", variant: "Orion" },
+  // ArrowCopter (Austrian gyrocopter)
+  { manufacturer: "ArrowCopter", model: "AC20", variant: null },
+  // Trendak (Polish gyrocopter/UL)
+  { manufacturer: "Trendak", model: "Dragon", variant: null },
+
+  // ===== ADDITIONAL UL / LSA MANUFACTURERS =====
+  // Fascination (German UL)
+  { manufacturer: "Fascination", model: "D4", variant: null },
+  // Eurostar (German UL)
+  { manufacturer: "Eurostar", model: "EV97", variant: null },
+  { manufacturer: "Eurostar", model: "SL", variant: null },
+  // Dallach (Austrian UL)
+  { manufacturer: "Dallach", model: "Sunrise", variant: null },
+  { manufacturer: "Dallach", model: "D4", variant: "Fascination" },
+  // ICP (Italian UL)
+  { manufacturer: "ICP", model: "Savannah", variant: null },
+  { manufacturer: "ICP", model: "Savannah", variant: "S" },
+  { manufacturer: "ICP", model: "Bingo", variant: null },
+  // Roland (German UL)
+  { manufacturer: "Roland", model: "Z-602", variant: null },
+  // SD Planes (Czech UL)
+  { manufacturer: "SD Planes", model: "SD-1", variant: "Minisport" },
+  { manufacturer: "SD Planes", model: "SD-2", variant: null },
+  // Aeropro (Slovak UL)
+  { manufacturer: "Aeropro", model: "EuroFox", variant: null },
+  { manufacturer: "Aeropro", model: "EuroFox", variant: "2K" },
+  // Heller (German UL)
+  { manufacturer: "Heller", model: "UH-1", variant: null },
+  // Just Aircraft (US kitbuilt)
+  { manufacturer: "Just Aircraft", model: "SuperSTOL", variant: null },
+  { manufacturer: "Just Aircraft", model: "Highlander", variant: null },
+  // Kitfox (US kitbuilt)
+  { manufacturer: "Kitfox", model: "Series 7", variant: "Super Sport" },
+  { manufacturer: "Kitfox", model: "Speedster", variant: null },
+  // ELA (Spanish UL)
+  { manufacturer: "ELA", model: "Eclipse", variant: null },
+  { manufacturer: "ELA", model: "07", variant: null },
+  // FK Lightplanes (German UL)
+  { manufacturer: "FK Lightplanes", model: "FK9", variant: "Mark VI" },
+  { manufacturer: "FK Lightplanes", model: "FK14", variant: "Polaris" },
+  // Blackshape (Italian UL)
+  { manufacturer: "Blackshape", model: "Prime", variant: null },
+  { manufacturer: "Blackshape", model: "Gabriel", variant: null },
+  // Pioneer (Italian UL)
+  { manufacturer: "Pioneer", model: "300", variant: null },
+  { manufacturer: "Pioneer", model: "400", variant: null },
+  // Shark Aero (Slovak UL)
+  { manufacturer: "Shark Aero", model: "Shark", variant: "UL" },
+  // MTO (German gyrocopter)
+  { manufacturer: "MTO", model: "Sport", variant: null },
+  // Rotorsport (German gyrocopter)
+  { manufacturer: "Rotorsport", model: "MT-03", variant: null },
+  { manufacturer: "Rotorsport", model: "Calidus", variant: null },
+  // T.E.A.M. (French UL)
+  { manufacturer: "T.E.A.M.", model: "Mini-Max", variant: null },
+  // Swan (UL trike)
+  { manufacturer: "Swan", model: "UL", variant: null },
+  // Serk (German trike)
+  { manufacturer: "Serk", model: "Trike", variant: null },
+  // SFS (German UL)
+  { manufacturer: "SFS", model: "Tandem", variant: null },
+  // STOL (UL category)
+  { manufacturer: "STOL", model: "CH701", variant: null },
 ];
 
 const SYSTEM_PROMPT = `You are an aviation engineer providing accurate aircraft performance specifications.

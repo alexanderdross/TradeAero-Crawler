@@ -2,6 +2,24 @@ import * as cheerio from "cheerio";
 import { logger } from "../utils/logger.js";
 import type { ParsedAircraftListing, ParsedPartsListing } from "../types.js";
 
+/** Build a description that passes the 10+ char DB constraint */
+function buildDescription(
+  manufacturer: string,
+  model: string,
+  year: number | null,
+  price: number | null,
+  priceNegotiable: boolean
+): string {
+  const parts: string[] = [];
+  if (manufacturer) parts.push(`${manufacturer} ${model}`.trim());
+  if (year && year >= 1900) parts.push(`Baujahr ${year}`);
+  if (price) parts.push(`Preis: ${price.toLocaleString("de-DE")} EUR`);
+  else if (priceNegotiable) parts.push("Preis Verhandlungssache");
+  else parts.push("Preis auf Anfrage");
+  parts.push("Angebot auf aeromarkt.net");
+  return parts.join(". ") + ".";
+}
+
 /**
  * Parse aircraft listings from aeromarkt.net (Shopware 6 site).
  *
@@ -87,7 +105,7 @@ export function parseAeromarktAircraftPage(
         sourceName,
         postedDate: null,
         title,
-        description: `${title}. Baujahr: ${year ?? "k.A."}. ${priceNegotiable ? "Preis Verhandlungssache." : ""}`.trim(),
+        description: buildDescription(manufacturer, model, year, price, priceNegotiable),
         year,
         engine: null,
         totalTime: null,
