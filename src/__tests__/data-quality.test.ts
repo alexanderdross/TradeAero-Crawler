@@ -193,3 +193,81 @@ describe("fuzzy title dedup logic", () => {
     )).toBe(true);
   });
 });
+
+describe("sanitizeCity — reject description text, accept real cities", () => {
+  const GERMAN_CITY_TO_STATE: Record<string, string> = {
+    "münchen": "Bavaria", "augsburg": "Bavaria", "berlin": "Berlin",
+    "frankfurt": "Hesse", "hamburg": "Hamburg", "köln": "North Rhine-Westphalia",
+  };
+  const JUNK_LOCATION_WORDS = [
+    "verkauf", "privatverkauf", "angebot", "flugzeug", "flugzeuges", "aircraft",
+    "kontaktdaten", "kontakt", "email", "telefon", "tel", "mobil",
+    "segelfliegergruppe", "segelfluggelände", "verein", "viehheide",
+    "mittelhessen", "wartet", "biete", "suche", "hello", "offering",
+    "selling", "price", "preis", "baujahr", "betriebsstunden", "motor",
+    "data", "sheet", "info", "noreply", "description", "details",
+  ];
+
+  function sanitizeCity(raw: string | null): string | null {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (trimmed.length < 2 || trimmed.length > 40) return null;
+    if (/[\n•]/.test(trimmed)) return null;
+    if (/@|\.com|\.de|\.net/.test(trimmed)) return null;
+    if (/\+?\d{5,}/.test(trimmed)) return null;
+    const lower = trimmed.toLowerCase();
+    if (JUNK_LOCATION_WORDS.some((w) => lower.includes(w))) return null;
+    if (!/^[A-ZÄÖÜ]/.test(trimmed)) return null;
+    if (GERMAN_CITY_TO_STATE[lower]) return trimmed;
+    if (trimmed.split(/\s+/).length > 4) return null;
+    return trimmed;
+  }
+
+  it("accepts known German cities", () => {
+    expect(sanitizeCity("München")).toBe("München");
+    expect(sanitizeCity("Berlin")).toBe("Berlin");
+    expect(sanitizeCity("Frankfurt")).toBe("Frankfurt");
+  });
+
+  it("accepts unknown but valid-looking cities", () => {
+    expect(sanitizeCity("Pohlheim")).toBe("Pohlheim");
+    expect(sanitizeCity("Bad Aibling")).toBe("Bad Aibling");
+  });
+
+  it("rejects description text with junk words", () => {
+    expect(sanitizeCity("Privatverkauf")).toBeNull();
+    expect(sanitizeCity("flugzeug wartet")).toBeNull();
+    expect(sanitizeCity("des Flugzeuges")).toBeNull();
+  });
+
+  it("rejects long description bleed", () => {
+    expect(sanitizeCity("Segelfluggelände Pohlheim Viehheide in Mittelhessen nähe Gießen")).toBeNull();
+  });
+
+  it("rejects text with contact info", () => {
+    expect(sanitizeCity("info@example.de")).toBeNull();
+    expect(sanitizeCity("Tel +49152 08726719")).toBeNull();
+  });
+
+  it("rejects lowercase-starting text", () => {
+    expect(sanitizeCity("des Flugzeuges")).toBeNull();
+  });
+
+  it("rejects null and empty", () => {
+    expect(sanitizeCity(null)).toBeNull();
+    expect(sanitizeCity("")).toBeNull();
+    expect(sanitizeCity("A")).toBeNull();
+  });
+
+  it("rejects text longer than 40 chars", () => {
+    expect(sanitizeCity("This is a very long text that is definitely not a city name at all")).toBeNull();
+  });
+
+  it("rejects text with more than 4 words", () => {
+    expect(sanitizeCity("Some Random Five Word Place Name")).toBeNull();
+  });
+
+  it("accepts cities with up to 4 words", () => {
+    expect(sanitizeCity("Bad Neustadt an der")).toBe("Bad Neustadt an der");
+  });
+});

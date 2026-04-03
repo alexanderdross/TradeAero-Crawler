@@ -599,7 +599,8 @@ async function mapToAircraftRow(
 
   // Extract city and airfield from description text if not found in structured fields
   const fullText = `${listing.title} ${listing.description}`;
-  const city = listing.city ?? extractCityFromText(fullText);
+  const rawCity = listing.city ?? extractCityFromText(fullText);
+  const city = sanitizeCity(rawCity);
   const airfield = listing.airfieldName ?? extractAirfieldFromText(fullText);
   const icao = listing.icaoCode ?? extractIcaoFromText(fullText);
 
@@ -618,7 +619,7 @@ async function mapToAircraftRow(
     year: listing.year!,
     registration,
     serial_number: serialNumber,
-    location: listing.location ?? city ?? "Germany",
+    location: sanitizeCity(listing.location) ?? city ?? "Germany",
     city: city ?? null,
     state: resolveGermanState(city),
     country: "Germany",
@@ -845,6 +846,53 @@ const GERMAN_CITY_TO_STATE: Record<string, string> = {
   // City-states
   "berlin": "Berlin", "hamburg": "Hamburg", "bremen": "Bremen",
 };
+
+/** Words that indicate description text leaked into a city/location field */
+const JUNK_LOCATION_WORDS = [
+  "verkauf", "privatverkauf", "angebot", "flugzeug", "flugzeuges", "aircraft",
+  "kontaktdaten", "kontakt", "email", "telefon", "tel", "mobil", "handy",
+  "segelfliegergruppe", "segelfluggelände", "verein", "viehheide",
+  "mittelhessen", "wartet", "biete", "suche", "hello", "offering",
+  "selling", "price", "preis", "baujahr", "betriebsstunden", "motor",
+  "data", "sheet", "info", "noreply", "description", "details",
+];
+
+/**
+ * Validate and sanitize a city/location value.
+ * Returns null if the value looks like description text, not a real city name.
+ */
+function sanitizeCity(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+
+  // Too short or too long for a city name
+  if (trimmed.length < 2 || trimmed.length > 40) return null;
+
+  // Contains multiple lines or bullet points → description bleed
+  if (/[\n•]/.test(trimmed)) return null;
+
+  // Contains email-like patterns
+  if (/@|\.com|\.de|\.net/.test(trimmed)) return null;
+
+  // Contains phone numbers
+  if (/\+?\d{5,}/.test(trimmed)) return null;
+
+  // Check for junk words (description leaking into location)
+  const lower = trimmed.toLowerCase();
+  if (JUNK_LOCATION_WORDS.some((w) => lower.includes(w))) return null;
+
+  // Must start with uppercase letter (German city names always do)
+  if (!/^[A-ZÄÖÜ]/.test(trimmed)) return null;
+
+  // If it's a known city, always accept
+  if (GERMAN_CITY_TO_STATE[lower]) return trimmed;
+
+  // Max 4 words for an unknown city (e.g. "Bad Aibling am Inn")
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount > 4) return null;
+
+  return trimmed;
+}
 
 /**
  * Look up the German state for a city name.
