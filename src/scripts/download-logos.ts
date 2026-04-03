@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { HttpsProxyAgent } from "https-proxy-agent";
+import { ProxyAgent } from "undici";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
@@ -41,10 +41,10 @@ function isValidImage(buf: Buffer, minSize: number = 2000): boolean {
   return isPng || isJpeg || isSvg;
 }
 
-/** Download an image URL via Bright Data proxy with timeout */
+/** Download an image URL via Bright Data proxy (undici ProxyAgent) with timeout */
 async function downloadImage(
   url: string,
-  agent: any,
+  dispatcher: ProxyAgent,
   timeoutMs: number = 15000
 ): Promise<Buffer | null> {
   try {
@@ -54,10 +54,10 @@ async function downloadImage(
         Accept: "image/png,image/webp,image/jpeg,image/*,*/*;q=0.8",
         Referer: "https://www.google.com/",
       },
-      // @ts-ignore
-      agent,
+      // @ts-ignore — undici dispatcher for proxy support
+      dispatcher,
       signal: AbortSignal.timeout(timeoutMs),
-    } as any);
+    });
 
     if (!resp.ok) return null;
     const buf = Buffer.from(await resp.arrayBuffer());
@@ -84,7 +84,7 @@ async function main() {
 
   const supabase = createClient(supabaseUrl, supabaseKey);
   const anthropic = new Anthropic();
-  const agent = new HttpsProxyAgent(proxyUrl);
+  const proxy = new ProxyAgent(proxyUrl);
 
   // 1. Fetch ALL unique manufacturers from aircraft_reference_specs
   const { data: specs } = await supabase
@@ -149,7 +149,7 @@ Rules:
 
       // ── Try Wikimedia ──
       if (wikimediaUrl) {
-        const buf = await downloadImage(wikimediaUrl, agent);
+        const buf = await downloadImage(wikimediaUrl, proxy);
         if (buf && isValidImage(buf)) {
           fs.writeFileSync(outPath, buf);
           console.log(`  OK   ${mfg} [wikimedia] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
@@ -165,7 +165,7 @@ Rules:
       // ── TIER 2: Clearbit Logo API ──
       if (!downloaded && websiteDomain) {
         const clearbitUrl = `https://logo.clearbit.com/${websiteDomain}`;
-        const buf = await downloadImage(clearbitUrl, agent);
+        const buf = await downloadImage(clearbitUrl, proxy);
         if (buf && isValidImage(buf, 500)) {
           fs.writeFileSync(outPath, buf);
           console.log(`  OK   ${mfg} [clearbit] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
@@ -179,7 +179,7 @@ Rules:
       // ── TIER 3: Google Favicon (128px) ──
       if (!downloaded && websiteDomain) {
         const faviconUrl = `https://www.google.com/s2/favicons?domain=${websiteDomain}&sz=128`;
-        const buf = await downloadImage(faviconUrl, agent);
+        const buf = await downloadImage(faviconUrl, proxy);
         // Google favicon is smaller — accept > 500 bytes
         if (buf && buf.length > 500 && !buf.toString("utf8", 0, 15).includes("<!DOCTYPE")) {
           fs.writeFileSync(outPath, buf);
