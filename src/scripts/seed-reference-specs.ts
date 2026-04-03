@@ -906,11 +906,20 @@ const MODELS = [
   { manufacturer: "STOL", model: "CH701", variant: null },
 ];
 
-const SYSTEM_PROMPT = `You are an aviation engineer providing accurate aircraft performance specifications.
+const SYSTEM_PROMPT = `You are an aviation engineer and aviation marketing expert providing accurate aircraft performance specifications and SEO-optimized descriptions.
 
-Given an aircraft manufacturer, model, and optional variant, return the standard performance specs as JSON.
+Given an aircraft manufacturer, model, and optional variant, return the standard performance specs AND an SEO/GEO-optimized description as JSON.
 
-Use metric units. Only include data you are confident about. For values you're unsure of, use null.
+The seo_description should be:
+- 2-4 sentences, 50-120 words
+- Written for aircraft buyers and aviation enthusiasts
+- Include key selling points: what the aircraft is known for, its primary use case, notable features
+- Mention the aircraft category (e.g. single-engine piston, ultralight, trike, gyrocopter)
+- Natural language optimized for Google and AI search engines (GEO)
+- Professional, informative tone — not salesy
+- In English
+
+Use metric units for specs. Only include data you are confident about. For values you're unsure of, use null.
 
 Return ONLY valid JSON with this exact structure (no markdown):
 {
@@ -929,7 +938,8 @@ Return ONLY valid JSON with this exact structure (no markdown):
   "engine_type": "Rotax 912 ULS",
   "engine_power": "100",
   "fuel_type": "MOGAS",
-  "seats": "2"
+  "seats": "2",
+  "seo_description": "The ... is a popular ... aircraft known for ..."
 }`;
 
 async function main() {
@@ -1006,6 +1016,7 @@ async function main() {
         engine_power_unit: "PS",
         fuel_type: specs.fuel_type,
         seats: specs.seats ?? "2",
+        seo_description: specs.seo_description ?? null,
         source: "claude-haiku",
         confidence: "high",
       });
@@ -1082,6 +1093,7 @@ async function main() {
             engine_power_unit: "PS",
             fuel_type: specs.fuel_type,
             seats: specs.seats ?? "2",
+            seo_description: specs.seo_description ?? null,
             source: "claude-haiku",
             confidence: "high",
           })
@@ -1106,6 +1118,78 @@ async function main() {
     console.log(`\nSkeleton fill: ${filled} filled, ${fillFailed} failed`);
   } else {
     console.log("No skeleton rows found.");
+  }
+
+  // === THIRD PASS: Generate SEO descriptions for rows that have specs but no description ===
+  console.log("\nChecking for rows missing SEO description...\n");
+
+  const { data: noDesc } = await supabase
+    .from("aircraft_reference_specs")
+    .select("id, manufacturer, model, variant, engine_type, seats, category")
+    .is("seo_description", null)
+    .not("engine_type", "is", null);
+
+  if (noDesc && noDesc.length > 0) {
+    console.log(`Found ${noDesc.length} rows missing SEO description.\n`);
+    let descOk = 0;
+    let descFail = 0;
+
+    const SEO_PROMPT = `You are an aviation marketing expert. Given an aircraft manufacturer, model, variant, engine, seats, and category, write a short SEO/GEO-optimized description (2-4 sentences, 50-120 words) for a model page on an aircraft marketplace website.
+
+Rules:
+- Written for aircraft buyers and aviation enthusiasts
+- Mention what the aircraft is known for and its primary use case
+- Include the aircraft category naturally (e.g. single-engine piston, ultralight trike, gyrocopter)
+- Optimized for Google search and AI-powered search engines
+- Professional, informative tone
+- In English
+- Return ONLY the description text, no JSON, no markdown`;
+
+    for (const row of noDesc) {
+      const label = `${row.manufacturer} ${row.model} ${row.variant || ""}`.trim();
+      try {
+        const response = await anthropic.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 256,
+          temperature: 0.3,
+          system: SEO_PROMPT,
+          messages: [{
+            role: "user",
+            content: `Aircraft: ${label}\nEngine: ${row.engine_type || "unknown"}\nSeats: ${row.seats || "unknown"}\nCategory: ${row.category || "unknown"}`,
+          }],
+        });
+
+        const desc = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+        if (desc.length < 20) {
+          console.log(`  SKIP ${label} (description too short)`);
+          descFail++;
+          continue;
+        }
+
+        const { error } = await supabase
+          .from("aircraft_reference_specs")
+          .update({ seo_description: desc })
+          .eq("id", row.id);
+
+        if (error) {
+          console.log(`  FAIL ${label}: ${error.message}`);
+          descFail++;
+        } else {
+          console.log(`  OK   ${label}`);
+          descOk++;
+        }
+
+        await new Promise((r) => setTimeout(r, 150));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`  FAIL ${label}: ${msg}`);
+        descFail++;
+      }
+    }
+
+    console.log(`\nSEO descriptions: ${descOk} generated, ${descFail} failed`);
+  } else {
+    console.log("All rows already have SEO descriptions.");
   }
 }
 
