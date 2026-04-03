@@ -906,15 +906,39 @@ const MODELS = [
   { manufacturer: "STOL", model: "CH701", variant: null },
 ];
 
+const VALID_CATEGORIES = [
+  "Single Engine Piston",
+  "Multi Engine Piston",
+  "Jet",
+  "Turboprop",
+  "Helicopter / Gyrocopter",
+  "Ultralight / Light Sport Aircraft (LSA)",
+  "Commercial Airliner",
+  "Experimental / Homebuilt",
+  "Glider",
+  "Microlight / Flex-Wing",
+];
+
 const SYSTEM_PROMPT = `You are an aviation engineer and aviation marketing expert providing accurate aircraft performance specifications and SEO-optimized descriptions.
 
-Given an aircraft manufacturer, model, and optional variant, return the standard performance specs AND an SEO/GEO-optimized description as JSON.
+Given an aircraft manufacturer, model, and optional variant, return the standard performance specs, category, AND an SEO/GEO-optimized description as JSON.
+
+The "category" field MUST be exactly one of these values:
+- "Single Engine Piston" — Cessna 172, Piper PA-28, Beechcraft Bonanza, Mooney, Cirrus SR22, etc.
+- "Multi Engine Piston" — Piper Seneca, Beechcraft Baron, Cessna 310, Diamond DA42, etc.
+- "Jet" — Citation, Learjet, Gulfstream, Bombardier, Embraer, HondaJet, etc.
+- "Turboprop" — King Air, TBM, PC-12, Pilatus, Daher, etc.
+- "Helicopter / Gyrocopter" — Robinson R44, Bell, Airbus H125, AutoGyro, etc.
+- "Ultralight / Light Sport Aircraft (LSA)" — Rotax-powered ULs, Comco Ikarus, Flight Design, etc.
+- "Commercial Airliner" — Boeing, Airbus A320, etc.
+- "Experimental / Homebuilt" — Van's RV, Lancair, Glasair, etc.
+- "Glider" — Schempp-Hirth, DG, ASK, Stemme, etc.
+- "Microlight / Flex-Wing" — Trikes, paramotors, flex-wing aircraft
 
 The seo_description should be:
 - 2-4 sentences, 50-120 words
 - Written for aircraft buyers and aviation enthusiasts
 - Include key selling points: what the aircraft is known for, its primary use case, notable features
-- Mention the aircraft category (e.g. single-engine piston, ultralight, trike, gyrocopter)
 - Natural language optimized for Google and AI search engines (GEO)
 - Professional, informative tone — not salesy
 - In English
@@ -923,6 +947,7 @@ Use metric units for specs. Only include data you are confident about. For value
 
 Return ONLY valid JSON with this exact structure (no markdown):
 {
+  "category": "Single Engine Piston",
   "cruise_speed": "185",
   "max_speed": "220",
   "max_range": "1200",
@@ -994,11 +1019,15 @@ async function main() {
       const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       const specs = JSON.parse(jsonStr);
 
+      // Validate category — must be one of the known values
+      const assignedCategory = VALID_CATEGORIES.includes(specs.category) ? specs.category : null;
+
       // Insert into DB
       const { error } = await supabase.from("aircraft_reference_specs").insert({
         manufacturer: model.manufacturer,
         model: model.model,
         variant: model.variant ?? "",
+        category: assignedCategory,
         cruise_speed: specs.cruise_speed,
         max_speed: specs.max_speed,
         max_range: specs.max_range,
@@ -1190,6 +1219,79 @@ Rules:
     console.log(`\nSEO descriptions: ${descOk} generated, ${descFail} failed`);
   } else {
     console.log("All rows already have SEO descriptions.");
+  }
+
+  // === FOURTH PASS: Fix wrong categories (default "Light Sport Aircraft" or NULL) ===
+  console.log("\nChecking for rows with wrong/default categories...\n");
+
+  const { data: wrongCat } = await supabase
+    .from("aircraft_reference_specs")
+    .select("id, manufacturer, model, variant, engine_type, seats, category")
+    .or("category.is.null,category.eq.Light Sport Aircraft");
+
+  if (wrongCat && wrongCat.length > 0) {
+    // Filter to only rows that are clearly NOT LSA (e.g., Beechcraft, Cessna 172+, Piper PA-28+)
+    // by asking Claude for the correct category
+    console.log(`Found ${wrongCat.length} rows with default/null category to verify.\n`);
+    let catFixed = 0;
+    let catSkipped = 0;
+    let catFailed = 0;
+
+    for (const row of wrongCat) {
+      const label = `${row.manufacturer} ${row.model}${row.variant ? ` ${row.variant}` : ""}`;
+
+      try {
+        const response = await anthropic.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 100,
+          temperature: 0,
+          system: `You are an aviation expert. Given an aircraft, return ONLY the category name — one of these exact strings:
+"Single Engine Piston", "Multi Engine Piston", "Jet", "Turboprop", "Helicopter / Gyrocopter", "Ultralight / Light Sport Aircraft (LSA)", "Commercial Airliner", "Experimental / Homebuilt", "Glider", "Microlight / Flex-Wing"
+Return ONLY the category string, nothing else.`,
+          messages: [{
+            role: "user",
+            content: `Aircraft: ${label}`,
+          }],
+        });
+
+        const cat = (response.content[0].type === "text" ? response.content[0].text : "").trim();
+
+        if (!VALID_CATEGORIES.includes(cat)) {
+          console.log(`  SKIP ${label} (invalid category: "${cat}")`);
+          catSkipped++;
+          continue;
+        }
+
+        // Only update if category actually changed
+        if (cat === row.category) {
+          catSkipped++;
+          continue;
+        }
+
+        const { error } = await supabase
+          .from("aircraft_reference_specs")
+          .update({ category: cat })
+          .eq("id", row.id);
+
+        if (error) {
+          console.log(`  FAIL ${label}: ${error.message}`);
+          catFailed++;
+        } else {
+          console.log(`  FIX  ${label}: "${row.category}" → "${cat}"`);
+          catFixed++;
+        }
+
+        await new Promise((r) => setTimeout(r, 100));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`  FAIL ${label}: ${msg}`);
+        catFailed++;
+      }
+    }
+
+    console.log(`\nCategory fix: ${catFixed} updated, ${catSkipped} already correct, ${catFailed} failed`);
+  } else {
+    console.log("All rows have correct categories.");
   }
 }
 
