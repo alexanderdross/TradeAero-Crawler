@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { ProxyAgent } from "undici";
+import { fetch as undiciFetch, ProxyAgent } from "undici";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
@@ -41,27 +41,43 @@ function isValidImage(buf: Buffer, minSize: number = 2000): boolean {
   return isPng || isJpeg || isSvg;
 }
 
-/** Download an image URL via Bright Data proxy (undici ProxyAgent) with timeout */
-async function downloadImage(
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept: "image/png,image/webp,image/jpeg,image/*,*/*;q=0.8",
+  Referer: "https://www.google.com/",
+};
+
+/** Download an image URL via Bright Data proxy (undici fetch with dispatcher) */
+async function downloadViaProxy(
   url: string,
-  dispatcher: ProxyAgent,
+  proxy: ProxyAgent,
   timeoutMs: number = 15000
 ): Promise<Buffer | null> {
   try {
-    const resp = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "image/png,image/webp,image/jpeg,image/*,*/*;q=0.8",
-        Referer: "https://www.google.com/",
-      },
-      // @ts-ignore — undici dispatcher for proxy support
-      dispatcher,
+    const resp = await undiciFetch(url, {
+      headers: BROWSER_HEADERS,
+      dispatcher: proxy,
       signal: AbortSignal.timeout(timeoutMs),
     });
-
     if (!resp.ok) return null;
-    const buf = Buffer.from(await resp.arrayBuffer());
-    return buf;
+    return Buffer.from(await resp.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/** Download an image URL directly (no proxy — for Clearbit, Google, etc.) */
+async function downloadDirect(
+  url: string,
+  timeoutMs: number = 10000
+): Promise<Buffer | null> {
+  try {
+    const resp = await undiciFetch(url, {
+      headers: BROWSER_HEADERS,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return null;
+    return Buffer.from(await resp.arrayBuffer());
   } catch {
     return null;
   }
@@ -147,9 +163,9 @@ Rules:
 
       let downloaded = false;
 
-      // ── Try Wikimedia ──
+      // ── Try Wikimedia (via Bright Data proxy) ──
       if (wikimediaUrl) {
-        const buf = await downloadImage(wikimediaUrl, proxy);
+        const buf = await downloadViaProxy(wikimediaUrl, proxy);
         if (buf && isValidImage(buf)) {
           fs.writeFileSync(outPath, buf);
           console.log(`  OK   ${mfg} [wikimedia] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
@@ -158,14 +174,14 @@ Rules:
         } else if (buf === null) {
           console.log(`  ──   ${mfg} [wikimedia] failed (download error), trying fallbacks...`);
         } else {
-          console.log(`  ──   ${mfg} [wikimedia] invalid image, trying fallbacks...`);
+          console.log(`  ──   ${mfg} [wikimedia] invalid image (${buf.length}B), trying fallbacks...`);
         }
       }
 
-      // ── TIER 2: Clearbit Logo API ──
+      // ── TIER 2: Clearbit Logo API (direct — no proxy needed) ──
       if (!downloaded && websiteDomain) {
         const clearbitUrl = `https://logo.clearbit.com/${websiteDomain}`;
-        const buf = await downloadImage(clearbitUrl, proxy);
+        const buf = await downloadDirect(clearbitUrl);
         if (buf && isValidImage(buf, 500)) {
           fs.writeFileSync(outPath, buf);
           console.log(`  OK   ${mfg} [clearbit] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
@@ -176,10 +192,10 @@ Rules:
         }
       }
 
-      // ── TIER 3: Google Favicon (128px) ──
+      // ── TIER 3: Google Favicon 128px (direct — no proxy needed) ──
       if (!downloaded && websiteDomain) {
         const faviconUrl = `https://www.google.com/s2/favicons?domain=${websiteDomain}&sz=128`;
-        const buf = await downloadImage(faviconUrl, proxy);
+        const buf = await downloadDirect(faviconUrl);
         // Google favicon is smaller — accept > 500 bytes
         if (buf && buf.length > 500 && !buf.toString("utf8", 0, 15).includes("<!DOCTYPE")) {
           fs.writeFileSync(outPath, buf);
