@@ -418,6 +418,31 @@ export async function upsertAircraftListing(
         return "skipped";
       }
     }
+
+    // Fuzzy title dedup: match by first 30 chars of headline + same year + same price
+    if (listing.year && listing.price) {
+      const titlePrefix = stripTitleDatePrefix(listing.title).substring(0, 30).trim();
+      if (titlePrefix.length >= 10) {
+        const { data: dupByTitle } = await supabase
+          .from("aircraft_listings")
+          .select("id, source_name")
+          .ilike("headline", `${titlePrefix}%`)
+          .eq("year", listing.year)
+          .eq("price", listing.price)
+          .neq("source_url", listing.sourceId)
+          .limit(1)
+          .maybeSingle();
+
+        if (dupByTitle) {
+          logger.info("Fuzzy duplicate found by title+year+price", {
+            titlePrefix,
+            sourceId: listing.sourceId,
+            existingSource: dupByTitle.source_name,
+          });
+          return "skipped";
+        }
+      }
+    }
   }
 
   // Resolve manufacturer (needed for both paths)
@@ -491,6 +516,8 @@ export async function upsertAircraftListing(
     if (refModel) {
       record.model = refVariant ? `${refModel} ${refVariant}` : refModel;
     }
+    // Note: headline is kept as the original crawled text (good for SEO keywords).
+    // Frontend displays clean "Manufacturer Model" for UI cards/breadcrumbs.
   }
 
   // Remove slug fields — let DB trigger generate slug + listing_number on INSERT

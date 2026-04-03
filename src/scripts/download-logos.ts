@@ -130,6 +130,31 @@ Rules:
       } as any);
 
       if (!imgResponse.ok) {
+        // Rate limited — wait and retry once
+        if (imgResponse.status === 429) {
+          console.log(`  RETRY ${mfg}: Rate limited, waiting 5s...`);
+          await new Promise((r) => setTimeout(r, 5000));
+          const retry = await fetch(logoUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+              Accept: "image/png,image/webp,image/*,*/*;q=0.8",
+              Referer: "https://commons.wikimedia.org/",
+            },
+            // @ts-ignore
+            agent,
+            signal: AbortSignal.timeout(15000),
+          } as any);
+          if (retry.ok) {
+            const buf = Buffer.from(await retry.arrayBuffer());
+            if (buf.length > 500 && !buf.toString("utf8", 0, 15).includes("<!DOCTYPE")) {
+              fs.writeFileSync(outPath, buf);
+              console.log(`  OK   ${mfg} (retry) → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
+              ok++;
+              await new Promise((r) => setTimeout(r, 2000));
+              continue;
+            }
+          }
+        }
         console.log(`  FAIL ${mfg}: HTTP ${imgResponse.status} for ${logoUrl}`);
         fail++;
         continue;
@@ -153,8 +178,8 @@ Rules:
       console.log(`  OK   ${mfg} → ${slug}-logo.png (${(buffer.length / 1024).toFixed(1)}KB)`);
       ok++;
 
-      // Polite delay
-      await new Promise((r) => setTimeout(r, 300));
+      // Polite delay (1.5s to avoid Wikimedia rate limiting)
+      await new Promise((r) => setTimeout(r, 1500));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`  FAIL ${mfg}: ${msg}`);
