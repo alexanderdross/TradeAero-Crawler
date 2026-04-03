@@ -70,11 +70,19 @@ async function main() {
     const slug = nameToSlug(mfg);
     const outPath = path.join(OUTPUT_DIR, `${slug}-logo.png`);
 
-    // Skip if logo already exists and is > 1KB (real image)
-    if (fs.existsSync(outPath) && fs.statSync(outPath).size > 1000) {
-      console.log(`  SKIP ${mfg} (exists: ${(fs.statSync(outPath).size / 1024).toFixed(1)}KB)`);
-      skipped++;
-      continue;
+    // Skip if a valid PNG/JPEG logo already exists (check magic bytes, not just size)
+    if (fs.existsSync(outPath)) {
+      const existing = fs.readFileSync(outPath);
+      const isPng = existing[0] === 0x89 && existing[1] === 0x50 && existing[2] === 0x4e && existing[3] === 0x47;
+      const isJpeg = existing[0] === 0xff && existing[1] === 0xd8 && existing[2] === 0xff;
+      if ((isPng || isJpeg) && existing.length > 2000) {
+        console.log(`  SKIP ${mfg} (valid ${isPng ? "PNG" : "JPEG"}: ${(existing.length / 1024).toFixed(1)}KB)`);
+        skipped++;
+        continue;
+      }
+      // Remove invalid/placeholder file so we re-download
+      fs.unlinkSync(outPath);
+      console.log(`  CLEAN ${mfg} (removed invalid file: ${existing.length} bytes)`);
     }
 
     // 2. Ask Claude for the best logo URL
