@@ -19,7 +19,9 @@ import * as path from "path";
  * Requires: BRIGHT_DATA_PROXY_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
  */
 
-const OUTPUT_DIR = path.resolve(__dirname, "../../../TradeAero-Refactor/public/assets/logos");
+const OUTPUT_DIR = process.env.LOGO_OUTPUT_DIR
+  ? path.resolve(process.env.LOGO_OUTPUT_DIR)
+  : path.resolve(__dirname, "../../../TradeAero-Refactor/public/assets/logos");
 
 function nameToSlug(name: string): string {
   return name

@@ -9,18 +9,14 @@ env:
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Crawler
         uses: actions/checkout@v4
 
-      - name: Checkout Refactor (for logo output)
-        uses: actions/checkout@v4
-        with:
-          repository: alexanderdross/TradeAero-Refactor
-          path: TradeAero-Refactor
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create logos output directory
+        run: mkdir -p logos
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,15 +32,21 @@ jobs:
 
       - name: Download logos via Bright Data proxy
         env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRIGHT_DATA_PROXY_URL: ${{ secrets.BRIGHT_DATA_PROXY_URL }}
+          LOGO_OUTPUT_DIR: ./logos
         run: npx tsx src/scripts/download-logos.ts
 
       - name: List downloaded logos
-        run: ls -la TradeAero-Refactor/public/assets/logos/*-logo* || echo "No logos found"
+        run: ls -la logos/*-logo* 2>/dev/null && echo "---" && ls logos/*-logo* 2>/dev/null | wc -l || echo "No logos found"
 
       - name: Upload logos as artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: manufacturer-logos
-          path: TradeAero-Refactor/public/assets/logos/*-logo*
-          retention-days: 30
+          path: logos/*-logo*
+          retention-days: 90
+          if-no-files-found: warn
