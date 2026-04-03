@@ -1,19 +1,18 @@
 import * as cheerio from "cheerio";
-import { cleanText, generateSourceId } from "../utils/html.js";
 import { logger } from "../utils/logger.js";
 import type { ParsedAircraftListing, ParsedPartsListing } from "../types.js";
 
 /**
- * Parse aircraft listings from aeromarkt.net.
+ * Parse aircraft listings from aeromarkt.net (Shopware 6 site).
  *
- * Site structure (from homepage observation):
- * - Categories: Kolbenmotorflugzeuge, Jets & Turboprops, Helikopter & Gyrocopter,
- *   Leichtflugzeuge (UL, VLA, ELA), Experimentals & Classics, Sonstige Luftfahrzeuge
- * - Parts: Triebwerke, Avionik & Instrumente
- *
- * TODO: Refine selectors once we can test against live HTML.
- * The site uses a modern layout with category cards and listing pages.
- * Parsers need to be calibrated against actual HTML structure.
+ * Listing structure (server-rendered):
+ * - Each listing is a `div.listview-item`
+ * - Manufacturer in `h2 strong`, Model in `h3 strong`
+ * - Price in `p.price span`
+ * - Year from text "Baujahr: XXXX"
+ * - Detail link from `a[href][title]`
+ * - Images from `img.img-fluid`
+ * - Pagination via `li.page-next a.page-link`
  */
 export function parseAeromarktAircraftPage(
   html: string,
@@ -23,69 +22,123 @@ export function parseAeromarktAircraftPage(
   const $ = cheerio.load(html);
   const listings: ParsedAircraftListing[] = [];
 
-  // Try common listing container patterns
-  const selectors = [
-    ".listing-item", ".ad-item", ".classified-item",
-    ".offer-item", ".result-item", "article.listing",
-    ".inserat", ".anzeige", ".angebot",
-    "table.results tr", ".search-result",
-  ];
+  $("div.listview-item").each((i, el) => {
+    try {
+      const $item = $(el);
 
-  let blocks: string[] = [];
-  for (const selector of selectors) {
-    $(selector).each((_, el) => {
-      blocks.push($.html(el));
-    });
-    if (blocks.length > 0) {
-      logger.debug(`Found listings with selector: ${selector}`, { count: blocks.length, pageUrl });
-      break;
-    }
-  }
+      // Extract manufacturer and model from h2/h3 strong tags
+      const manufacturer = $item.find(".new-lfz-description h2 strong").text().trim();
+      const model = $item.find(".new-lfz-description h3 strong").text().trim();
 
-  // Fallback: look for structured data or repeated patterns
-  if (blocks.length === 0) {
-    // Try finding links that look like detail pages
-    $("a[href]").each((_, el) => {
-      const href = $(el).attr("href") ?? "";
-      const text = $(el).text().trim();
-      // Aeromarkt detail pages likely have /inserat/, /angebot/, or numeric IDs
-      if ((href.includes("/inserat/") || href.includes("/angebot/") || /\/\d{4,}/.test(href)) && text.length > 10) {
-        const parent = $(el).closest("div, li, article, tr");
-        if (parent.length) {
-          blocks.push($.html(parent));
+      // Build title from manufacturer + model
+      const title = [manufacturer, model].filter(Boolean).join(" ").trim();
+      if (!title || title.length < 3) return;
+
+      // Detail URL
+      const detailLink = $item.find(".new-lfz-description h2 a").attr("href")
+        ?? $item.find("a[href][title]").first().attr("href");
+      const detailUrl = detailLink
+        ? (detailLink.startsWith("http") ? detailLink : `https://www.aeromarkt.net${detailLink}`)
+        : pageUrl;
+
+      // Price extraction
+      const priceText = $item.find("p.price span").text().trim();
+      let price: number | null = null;
+      let priceNegotiable = false;
+
+      if (priceText.includes("Preis auf Anfrage")) {
+        price = null;
+        priceNegotiable = true;
+      } else if (priceText.includes("Verhandlungssache")) {
+        priceNegotiable = true;
+        const priceMatch = priceText.match(/([\d.,]+)\s*€/);
+        if (priceMatch) {
+          price = parseFloat(priceMatch[1].replace(/\./g, "").replace(",", "."));
+          if (isNaN(price)) price = null;
+        }
+      } else {
+        const priceMatch = priceText.match(/([\d.,]+)\s*€/) ?? priceText.match(/€\s*([\d.,]+)/);
+        if (priceMatch) {
+          price = parseFloat(priceMatch[1].replace(/\./g, "").replace(",", "."));
+          if (isNaN(price)) price = null;
         }
       }
-    });
-  }
 
-  for (let i = 0; i < blocks.length; i++) {
-    try {
-      const listing = parseAircraftBlock(blocks[i], i, pageUrl, sourceName);
-      if (listing) listings.push(listing);
+      // Year extraction
+      const itemText = $item.text();
+      const yearMatch = itemText.match(/Baujahr:\s*(\d{4})/);
+      const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+      // Skip year 0 (invalid)
+      if (year !== null && year < 1900) return;
+
+      // Image extraction
+      const images: string[] = [];
+      $item.find("img.img-fluid").each((_, img) => {
+        const src = $(img).attr("src");
+        if (src && !src.includes("no_image") && !src.includes("banner") && !src.includes("logo")) {
+          const absoluteUrl = src.startsWith("http") ? src : `https://www.aeromarkt.net${src}`;
+          images.push(absoluteUrl);
+        }
+      });
+
+      listings.push({
+        sourceId: detailUrl,
+        sourceUrl: detailUrl,
+        sourceName,
+        postedDate: null,
+        title,
+        description: `${title}. Baujahr: ${year ?? "k.A."}. ${priceNegotiable ? "Preis Verhandlungssache." : ""}`.trim(),
+        year,
+        engine: null,
+        totalTime: null,
+        mtow: null,
+        rescueSystem: null,
+        annualInspection: null,
+        dulvRef: null,
+        price,
+        priceNegotiable,
+        location: null,
+        city: null,
+        airfieldName: null,
+        icaoCode: null,
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        imageUrls: images,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`Failed to parse aeromarkt block ${i}`, { pageUrl, error: msg });
-    }
-  }
-
-  // Pagination: look for "next" links
-  let nextPageUrl: string | null = null;
-  $("a").each((_, el) => {
-    const text = $(el).text().trim().toLowerCase();
-    const rel = $(el).attr("rel") ?? "";
-    if (text === "weiter" || text === "»" || text === "next" || rel === "next") {
-      const href = $(el).attr("href");
-      if (href) {
-        const base = new URL(pageUrl).origin;
-        nextPageUrl = href.startsWith("http") ? href : `${base}${href.startsWith("/") ? "" : "/"}${href}`;
-      }
+      logger.warn(`Failed to parse aeromarkt listing block ${i}`, { pageUrl, error: msg });
     }
   });
 
-  logger.info(`Parsed aeromarkt aircraft page`, { pageUrl, listings: listings.length, hasNext: !!nextPageUrl });
+  // Pagination: find "next page" link
+  let nextPageUrl: string | null = null;
+  const nextLink = $("li.page-next a.page-link").attr("href");
+  if (nextLink) {
+    const base = new URL(pageUrl);
+    if (nextLink.startsWith("http")) {
+      nextPageUrl = nextLink;
+    } else if (nextLink.startsWith("?")) {
+      nextPageUrl = `${base.origin}${base.pathname}${nextLink}`;
+    } else {
+      nextPageUrl = `${base.origin}${nextLink}`;
+    }
+  }
+
+  logger.info("Parsed aeromarkt aircraft page", {
+    pageUrl,
+    listings: listings.length,
+    hasNext: !!nextPageUrl,
+  });
+
   return { listings, nextPageUrl };
 }
 
+/**
+ * Parse parts listings from aeromarkt.net.
+ * Same structure as aircraft but in parts categories (Triebwerke, Avionik).
+ */
 export function parseAeromarktPartsPage(
   html: string,
   pageUrl: string,
@@ -94,163 +147,86 @@ export function parseAeromarktPartsPage(
   const $ = cheerio.load(html);
   const listings: ParsedPartsListing[] = [];
 
-  // Similar approach as aircraft — try common selectors
-  const selectors = [
-    ".listing-item", ".ad-item", ".offer-item", ".result-item",
-    ".inserat", ".anzeige", ".angebot",
-  ];
-
-  let blocks: string[] = [];
-  for (const selector of selectors) {
-    $(selector).each((_, el) => {
-      blocks.push($.html(el));
-    });
-    if (blocks.length > 0) break;
-  }
-
-  for (let i = 0; i < blocks.length; i++) {
+  $("div.listview-item").each((i, el) => {
     try {
-      const listing = parsePartsBlock(blocks[i], i, pageUrl, sourceName);
-      if (listing) listings.push(listing);
+      const $item = $(el);
+
+      const manufacturer = $item.find(".new-lfz-description h2 strong").text().trim();
+      const model = $item.find(".new-lfz-description h3 strong").text().trim();
+      const title = [manufacturer, model].filter(Boolean).join(" ").trim();
+      if (!title || title.length < 3) return;
+
+      const detailLink = $item.find(".new-lfz-description h2 a").attr("href")
+        ?? $item.find("a[href][title]").first().attr("href");
+      const detailUrl = detailLink
+        ? (detailLink.startsWith("http") ? detailLink : `https://www.aeromarkt.net${detailLink}`)
+        : pageUrl;
+
+      const priceText = $item.find("p.price span").text().trim();
+      let price: number | null = null;
+      const priceMatch = priceText.match(/([\d.,]+)\s*€/) ?? priceText.match(/€\s*([\d.,]+)/);
+      if (priceMatch) {
+        price = parseFloat(priceMatch[1].replace(/\./g, "").replace(",", "."));
+        if (isNaN(price)) price = null;
+      }
+
+      const urlLower = pageUrl.toLowerCase();
+      let category: "avionics" | "engines" | "rescue" | "miscellaneous" = "miscellaneous";
+      if (urlLower.includes("avionik") || urlLower.includes("instrumente")) category = "avionics";
+      else if (urlLower.includes("triebwerk")) category = "engines";
+
+      const images: string[] = [];
+      $item.find("img.img-fluid").each((_, img) => {
+        const src = $(img).attr("src");
+        if (src && !src.includes("no_image") && !src.includes("banner") && !src.includes("logo")) {
+          const absoluteUrl = src.startsWith("http") ? src : `https://www.aeromarkt.net${src}`;
+          images.push(absoluteUrl);
+        }
+      });
+
+      listings.push({
+        sourceId: detailUrl,
+        sourceUrl: detailUrl,
+        sourceName,
+        postedDate: null,
+        title,
+        description: title,
+        category,
+        totalTime: null,
+        condition: null,
+        price,
+        priceNegotiable: price === null,
+        vatIncluded: null,
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        imageUrls: images,
+        location: null,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`Failed to parse aeromarkt parts block ${i}`, { pageUrl, error: msg });
     }
-  }
+  });
 
   let nextPageUrl: string | null = null;
-  $("a").each((_, el) => {
-    const text = $(el).text().trim().toLowerCase();
-    if (text === "weiter" || text === "»" || text === "next") {
-      const href = $(el).attr("href");
-      if (href) {
-        const base = new URL(pageUrl).origin;
-        nextPageUrl = href.startsWith("http") ? href : `${base}${href.startsWith("/") ? "" : "/"}${href}`;
-      }
+  const nextLink = $("li.page-next a.page-link").attr("href");
+  if (nextLink) {
+    const base = new URL(pageUrl);
+    if (nextLink.startsWith("http")) {
+      nextPageUrl = nextLink;
+    } else if (nextLink.startsWith("?")) {
+      nextPageUrl = `${base.origin}${base.pathname}${nextLink}`;
+    } else {
+      nextPageUrl = `${base.origin}${nextLink}`;
     }
+  }
+
+  logger.info("Parsed aeromarkt parts page", {
+    pageUrl,
+    listings: listings.length,
+    hasNext: !!nextPageUrl,
   });
 
-  logger.info(`Parsed aeromarkt parts page`, { pageUrl, listings: listings.length, hasNext: !!nextPageUrl });
   return { listings, nextPageUrl };
-}
-
-function parseAircraftBlock(
-  blockHtml: string,
-  index: number,
-  pageUrl: string,
-  sourceName: string
-): ParsedAircraftListing | null {
-  const $ = cheerio.load(blockHtml);
-  const text = cleanText($("body").text());
-  if (text.length < 15) return null;
-
-  const title = $("a").first().text().trim() || $("h2, h3, h4, .title").first().text().trim() || text.slice(0, 100);
-  if (!title || title.length < 3) return null;
-
-  const yearMatch = text.match(/(?:Bj\.?|Baujahr|Year)[:\s]*(\d{4})/i);
-  const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
-
-  const ttMatch = text.match(/(?:TT|TTAF|Flugstunden|TSN)[:\s]*([\d.,]+)/i);
-  const totalTime = ttMatch ? parseFloat(ttMatch[1].replace(/\./g, "").replace(",", ".")) : null;
-
-  const priceMatch = text.match(/(?:€|EUR)\s*([\d.,]+)/i) ?? text.match(/([\d.]+)\s*(?:€|EUR)/i);
-  let price: number | null = null;
-  if (priceMatch) {
-    const cleaned = priceMatch[1].replace(/\./g, "").replace(",", ".");
-    price = parseFloat(cleaned);
-    if (isNaN(price)) price = null;
-  }
-
-  const locationMatch = text.match(/(?:Standort|Location|Ort)[:\s]*([^,\n]+)/i);
-
-  const images: string[] = [];
-  const baseUrl = new URL(pageUrl).origin;
-  $("img").each((_, el) => {
-    const src = $(el).attr("src");
-    if (src && !src.includes("logo") && !src.includes("icon") && !src.includes("banner") && !src.includes("pixel")) {
-      images.push(src.startsWith("http") ? src : `${baseUrl}${src.startsWith("/") ? "" : "/"}${src}`);
-    }
-  });
-
-  return {
-    sourceId: generateSourceId(pageUrl, index),
-    sourceUrl: pageUrl,
-    sourceName,
-    postedDate: null,
-    title,
-    description: text,
-    year,
-    engine: null,
-    totalTime,
-    mtow: null,
-    rescueSystem: null,
-    annualInspection: null,
-    dulvRef: null,
-    price,
-    priceNegotiable: price === null,
-    location: locationMatch ? cleanText(locationMatch[1]) : null,
-    city: null,
-    airfieldName: null,
-    icaoCode: null,
-    contactName: null,
-    contactEmail: null,
-    contactPhone: null,
-    imageUrls: images,
-  };
-}
-
-function parsePartsBlock(
-  blockHtml: string,
-  index: number,
-  pageUrl: string,
-  sourceName: string
-): ParsedPartsListing | null {
-  const $ = cheerio.load(blockHtml);
-  const text = cleanText($("body").text());
-  if (text.length < 15) return null;
-
-  const title = $("a").first().text().trim() || $("h2, h3, h4").first().text().trim() || text.slice(0, 100);
-  if (!title || title.length < 3) return null;
-
-  const priceMatch = text.match(/(?:€|EUR)\s*([\d.,]+)/i);
-  let price: number | null = null;
-  if (priceMatch) {
-    const cleaned = priceMatch[1].replace(/\./g, "").replace(",", ".");
-    price = parseFloat(cleaned);
-    if (isNaN(price)) price = null;
-  }
-
-  const urlLower = pageUrl.toLowerCase();
-  let category: "avionics" | "engines" | "rescue" | "miscellaneous" = "miscellaneous";
-  if (urlLower.includes("avionik") || urlLower.includes("instrumente")) category = "avionics";
-  else if (urlLower.includes("triebwerk")) category = "engines";
-
-  const images: string[] = [];
-  const baseUrl = new URL(pageUrl).origin;
-  $("img").each((_, el) => {
-    const src = $(el).attr("src");
-    if (src && !src.includes("logo") && !src.includes("icon")) {
-      images.push(src.startsWith("http") ? src : `${baseUrl}${src.startsWith("/") ? "" : "/"}${src}`);
-    }
-  });
-
-  return {
-    sourceId: generateSourceId(pageUrl, index),
-    sourceUrl: pageUrl,
-    sourceName,
-    postedDate: null,
-    title,
-    description: text,
-    category,
-    totalTime: null,
-    condition: null,
-    price,
-    priceNegotiable: price === null,
-    vatIncluded: null,
-    contactName: null,
-    contactEmail: null,
-    contactPhone: null,
-    imageUrls: images,
-    location: null,
-  };
 }
