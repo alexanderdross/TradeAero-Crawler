@@ -1293,6 +1293,91 @@ Return ONLY the category string, nothing else.`,
   } else {
     console.log("All rows have correct categories.");
   }
+  // === FIFTH PASS: Translate SEO descriptions into 13 locale columns ===
+  console.log("\nChecking for untranslated SEO descriptions...\n");
+
+  const TRANSLATE_LANGS = ["de", "fr", "es", "it", "pl", "cs", "sv", "nl", "pt", "ru", "tr", "el", "no"] as const;
+
+  // Find rows that have seo_description but are missing at least one locale
+  const { data: untranslated } = await supabase
+    .from("aircraft_reference_specs")
+    .select("id, manufacturer, model, variant, seo_description")
+    .not("seo_description", "is", null)
+    .is("seo_description_de", null); // If German is null, translations haven't been done
+
+  if (untranslated && untranslated.length > 0) {
+    console.log(`Found ${untranslated.length} rows needing SEO description translation.\n`);
+    let transOk = 0;
+    let transFail = 0;
+
+    const TRANSLATE_SYSTEM = `You are a professional aviation translator for TradeAero.
+
+Rules:
+- Translate the aircraft description into ALL requested target languages
+- Preserve all technical aviation abbreviations: TBO, SMOH, TTAF, IFR, VFR, STOL, MTOW, ADS-B, etc.
+- Preserve all brand names, model numbers, manufacturer names: Cessna, Piper, Garmin G1000, Continental IO-550, etc.
+- Use formal register (Sie-Form in German, vouvoiement in French, etc.)
+- Keep the same professional, concise marketing tone
+- Return valid JSON only: { "de": "...", "fr": "...", "es": "...", ... }`;
+
+    for (const row of untranslated) {
+      const label = `${row.manufacturer} ${row.model} ${row.variant || ""}`.trim();
+      try {
+        const response = await anthropic.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 4096,
+          temperature: 0.1,
+          system: TRANSLATE_SYSTEM,
+          messages: [{
+            role: "user",
+            content: `Translate this aircraft description into these languages: ${TRANSLATE_LANGS.join(", ")}\n\nEnglish description:\n${row.seo_description}`,
+          }],
+        });
+
+        const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+        // Parse JSON (strip markdown fences if present)
+        const cleaned = text.replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+        const translations = JSON.parse(cleaned) as Record<string, string>;
+
+        // Build update object with seo_description_XX columns
+        const update: Record<string, string> = {};
+        for (const lang of TRANSLATE_LANGS) {
+          if (translations[lang] && translations[lang].length > 20) {
+            update[`seo_description_${lang}`] = translations[lang];
+          }
+        }
+
+        if (Object.keys(update).length === 0) {
+          console.log(`  SKIP ${label} (no valid translations parsed)`);
+          transFail++;
+          continue;
+        }
+
+        const { error } = await supabase
+          .from("aircraft_reference_specs")
+          .update(update)
+          .eq("id", row.id);
+
+        if (error) {
+          console.log(`  FAIL ${label}: ${error.message}`);
+          transFail++;
+        } else {
+          console.log(`  OK   ${label} (${Object.keys(update).length} languages)`);
+          transOk++;
+        }
+
+        await new Promise((r) => setTimeout(r, 200));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`  FAIL ${label}: ${msg}`);
+        transFail++;
+      }
+    }
+
+    console.log(`\nSEO translations: ${transOk} translated, ${transFail} failed`);
+  } else {
+    console.log("All SEO descriptions already translated.");
+  }
 }
 
 main().catch(console.error);
