@@ -738,163 +738,100 @@ describe("parseAeromarktAircraftPage", () => {
   const PAGE_URL = "https://www.aeromarkt.net/kolbenmotorflugzeuge";
   const SOURCE = "aeromarkt";
 
-  it("parses aircraft listings using .listing-item selector", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/12345">Cessna 182 Skylane</a>
-          <p>Baujahr: 1997, TT: 2800, Standort: Frankfurt EDDF</p>
-          <p>€ 95.000</p>
-          <img src="/uploads/cessna182.jpg">
+  /** Helper to build Shopware 6 listview-item HTML */
+  function shopwareItem(opts: { manufacturer: string; model: string; year?: number; price?: string; detailHref?: string; image?: string }) {
+    return `
+      <div class="listview-item">
+        <div class="new-lfz-description">
+          <h2><a href="${opts.detailHref || '/detail/123'}" title="${opts.manufacturer} ${opts.model}"><strong>${opts.manufacturer}</strong></a></h2>
+          <h3><strong>${opts.model}</strong></h3>
+          ${opts.year ? `<p>Baujahr: ${opts.year}</p>` : ""}
         </div>
-      </body></html>
-    `;
-    const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
-    expect(result.listings.length).toBe(1);
-    const listing = result.listings[0];
-    expect(listing.title).toBe("Cessna 182 Skylane");
-    expect(listing.year).toBe(1997);
-    expect(listing.totalTime).toBe(2800);
-    expect(listing.price).toBe(95000);
-    expect(listing.location).toContain("Frankfurt");
-    expect(listing.imageUrls.length).toBe(1);
-    expect(listing.imageUrls[0]).toContain("cessna182.jpg");
-    expect(listing.sourceName).toBe(SOURCE);
-    expect(listing.sourceUrl).toBe(PAGE_URL);
-  });
+        <p class="price"><span>${opts.price || "Preis auf Anfrage"}</span></p>
+        ${opts.image ? `<img class="img-fluid" src="${opts.image}">` : ""}
+      </div>`;
+  }
 
-  it("parses listings using .ad-item selector", () => {
-    const html = `
-      <html><body>
-        <div class="ad-item">
-          <a href="/angebot/67890">Piper PA-32 Saratoga</a>
-          <p>Year: 2003, TTAF: 1200, Location: Zürich</p>
-          <p>EUR 175.000</p>
-        </div>
-      </body></html>
-    `;
+  it("parses aircraft listings using Shopware 6 div.listview-item selector", () => {
+    const html = `<html><body>${shopwareItem({
+      manufacturer: "Cessna", model: "182 Skylane", year: 1997, price: "95.000 €",
+      detailHref: "/inserat/12345", image: "/uploads/cessna182.jpg"
+    })}</body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
-    expect(result.listings[0].title).toBe("Piper PA-32 Saratoga");
-    expect(result.listings[0].price).toBe(175000);
-  });
-
-  it("extracts price in EUR format", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/11111">Beechcraft Baron 58</a>
-          <p>Bj. 1988 Flugstunden: 4500 EUR 220.000</p>
-        </div>
-      </body></html>
-    `;
-    const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
-    expect(result.listings.length).toBe(1);
-    expect(result.listings[0].price).toBe(220000);
+    expect(result.listings[0].title).toBe("Cessna 182 Skylane");
+    expect(result.listings[0].year).toBe(1997);
+    expect(result.listings[0].price).toBe(95000);
+    expect(result.listings[0].imageUrls.length).toBe(1);
+    expect(result.listings[0].sourceName).toBe(SOURCE);
   });
 
   it("extracts price with euro sign", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/22222">Diamond DA42 Twin Star</a>
-          <p>Baujahr: 2010 € 350.000 TT: 950</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>${shopwareItem({
+      manufacturer: "Diamond", model: "DA42 Twin Star", price: "350.000 €"
+    })}</body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].price).toBe(350000);
   });
 
   it("extracts year from Baujahr pattern", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/33333">Cirrus SR22 GTS</a>
-          <p>Baujahr: 2015, TT: 600, Standort: Wien, € 450.000</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>${shopwareItem({
+      manufacturer: "Cirrus", model: "SR22 GTS", year: 2015, price: "450.000 €"
+    })}</body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].year).toBe(2015);
   });
 
-  it("extracts location from Ort field", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/44444">Socata TB20 Trinidad</a>
-          <p>Bj.: 2001 TT: 1800 Ort: Nürnberg € 120.000</p>
-        </div>
-      </body></html>
-    `;
-    const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
-    expect(result.listings.length).toBe(1);
-    expect(result.listings[0].location).toContain("Nürnberg");
-  });
-
-  it("sets priceNegotiable true when no price found", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/55555">Grumman AA-5B Tiger</a>
-          <p>Baujahr: 1979 TT: 3500 Standort: Bremen</p>
-        </div>
-      </body></html>
-    `;
+  it("sets price null and priceNegotiable for Preis auf Anfrage", () => {
+    const html = `<html><body>${shopwareItem({
+      manufacturer: "Grumman", model: "AA-5B Tiger", price: "Preis auf Anfrage"
+    })}</body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].price).toBeNull();
     expect(result.listings[0].priceNegotiable).toBe(true);
   });
 
-  it("filters out logo and icon images", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/66666">Mooney M20R Ovation</a>
-          <p>Bj.: 2000, TT: 1100, Standort: Köln, € 180.000</p>
-          <img src="/static/logo.png">
-          <img src="/uploads/mooney_front.jpg">
-          <img src="/static/banner-top.gif">
-          <img src="/static/pixel.gif">
+  it("handles Verhandlungssache with price", () => {
+    const html = `<html><body>${shopwareItem({
+      manufacturer: "Mooney", model: "M20R", price: "180.000 € Verhandlungssache"
+    })}</body></html>`;
+    const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
+    expect(result.listings.length).toBe(1);
+    expect(result.listings[0].price).toBe(180000);
+    expect(result.listings[0].priceNegotiable).toBe(true);
+  });
+
+  it("filters out logo and banner images", () => {
+    const html = `<html><body>
+      <div class="listview-item">
+        <div class="new-lfz-description">
+          <h2><strong>Mooney</strong></h2>
+          <h3><strong>M20R</strong></h3>
         </div>
-      </body></html>
-    `;
+        <p class="price"><span>180.000 €</span></p>
+        <img class="img-fluid" src="/static/logo.png">
+        <img class="img-fluid" src="/uploads/mooney_front.jpg">
+        <img class="img-fluid" src="/static/banner-top.gif">
+      </div>
+    </body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].imageUrls.length).toBe(1);
     expect(result.listings[0].imageUrls[0]).toContain("mooney_front.jpg");
   });
 
-  it("detects next page link", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/77777">Robin DR400</a>
-          <p>Bj.: 1995 TT: 4000 € 55.000 Standort: Lyon</p>
-        </div>
-        <a href="/kolbenmotorflugzeuge?page=2">Weiter</a>
-      </body></html>
-    `;
+  it("detects next page link via li.page-next", () => {
+    const html = `<html><body>
+      ${shopwareItem({ manufacturer: "Robin", model: "DR400", price: "55.000 €" })}
+      <ul class="pagination">
+        <li class="page-next"><a class="page-link" href="?page=2">Weiter</a></li>
+      </ul>
+    </body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.nextPageUrl).toContain("page=2");
-  });
-
-  it("detects next page link with rel=next", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/88888">Tecnam P2006T</a>
-          <p>Baujahr: 2018 TT: 300 € 280.000</p>
-        </div>
-        <a href="/kolbenmotorflugzeuge?page=3" rel="next">3</a>
-      </body></html>
-    `;
-    const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
-    expect(result.nextPageUrl).toContain("page=3");
   });
 
   it("returns empty results for empty HTML", () => {
@@ -904,28 +841,17 @@ describe("parseAeromarktAircraftPage", () => {
   });
 
   it("returns empty results for HTML with no matching selectors", () => {
-    const html = `<html><body><div class="unrelated">Some text content here.</div></body></html>`;
+    const html = `<html><body><div class="unrelated">Some text.</div></body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(0);
   });
 
   it("parses multiple listings on a single page", () => {
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/10001">Cessna 152 Aerobat</a>
-          <p>Baujahr: 1978 TT: 8000 € 32.000 Standort: Hamburg</p>
-        </div>
-        <div class="listing-item">
-          <a href="/inserat/10002">Piper PA-28 Warrior</a>
-          <p>Baujahr: 1990 TT: 5500 € 48.000 Standort: Berlin</p>
-        </div>
-        <div class="listing-item">
-          <a href="/inserat/10003">Diamond DA20 Katana</a>
-          <p>Bj.: 2002 TT: 2100 € 65.000 Standort: München</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>
+      ${shopwareItem({ manufacturer: "Cessna", model: "152 Aerobat", year: 1978, price: "32.000 €" })}
+      ${shopwareItem({ manufacturer: "Piper", model: "PA-28 Warrior", year: 1990, price: "48.000 €" })}
+      ${shopwareItem({ manufacturer: "Diamond", model: "DA20 Katana", year: 2002, price: "65.000 €" })}
+    </body></html>`;
     const result = parseAeromarktAircraftPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(3);
     expect(result.listings[0].title).toBe("Cessna 152 Aerobat");
@@ -937,37 +863,37 @@ describe("parseAeromarktAircraftPage", () => {
 describe("parseAeromarktPartsPage", () => {
   const SOURCE = "aeromarkt";
 
+  function shopwarePartItem(opts: { manufacturer: string; model: string; price?: string; image?: string; detailHref?: string }) {
+    return `
+      <div class="listview-item">
+        <div class="new-lfz-description">
+          <h2><a href="${opts.detailHref || '/detail/p1'}"><strong>${opts.manufacturer}</strong></a></h2>
+          <h3><strong>${opts.model}</strong></h3>
+        </div>
+        <p class="price"><span>${opts.price || "Preis auf Anfrage"}</span></p>
+        ${opts.image ? `<img class="img-fluid" src="${opts.image}">` : ""}
+      </div>`;
+  }
+
   it("parses parts listings from avionik page", () => {
     const PAGE_URL = "https://www.aeromarkt.net/avionik-instrumente";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90001">Garmin GTN 650Xi</a>
-          <p>GPS/NAV/COM Navigator, neuwertig. € 8.500</p>
-          <img src="/uploads/gtn650.jpg">
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>${shopwarePartItem({
+      manufacturer: "Garmin", model: "GTN 650Xi", price: "8.500 €",
+      image: "/uploads/gtn650.jpg"
+    })}</body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
-    const listing = result.listings[0];
-    expect(listing.title).toBe("Garmin GTN 650Xi");
-    expect(listing.price).toBe(8500);
-    expect(listing.category).toBe("avionics");
-    expect(listing.imageUrls.length).toBe(1);
-    expect(listing.imageUrls[0]).toContain("gtn650.jpg");
+    expect(result.listings[0].title).toBe("Garmin GTN 650Xi");
+    expect(result.listings[0].price).toBe(8500);
+    expect(result.listings[0].category).toBe("avionics");
+    expect(result.listings[0].imageUrls.length).toBe(1);
   });
 
   it("parses parts listings from triebwerk page", () => {
     const PAGE_URL = "https://www.aeromarkt.net/triebwerke";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90002">Lycoming O-360-A1A 180PS</a>
-          <p>Generalüberholter Motor, 0 TSN. € 28.000</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>${shopwarePartItem({
+      manufacturer: "Lycoming", model: "O-360-A1A 180PS", price: "28.000 €"
+    })}</body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].title).toBe("Lycoming O-360-A1A 180PS");
@@ -977,63 +903,39 @@ describe("parseAeromarktPartsPage", () => {
 
   it("defaults to miscellaneous category for generic URL", () => {
     const PAGE_URL = "https://www.aeromarkt.net/zubehoer";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90003">David Clark H10-13.4 Headset</a>
-          <p>Gut erhalten, voll funktionsfähig. € 180</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>${shopwarePartItem({
+      manufacturer: "David Clark", model: "H10-13.4 Headset", price: "180 €"
+    })}</body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].category).toBe("miscellaneous");
   });
 
-  it("extracts price with EUR prefix", () => {
-    const PAGE_URL = "https://www.aeromarkt.net/avionik-instrumente";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90004">Trig TT21 Mode S Transponder</a>
-          <p>Neuwertiger Transponder mit ADS-B Out. EUR 2.200</p>
-        </div>
-      </body></html>
-    `;
-    const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
-    expect(result.listings.length).toBe(1);
-    expect(result.listings[0].price).toBe(2200);
-  });
-
   it("sets priceNegotiable true when no price found", () => {
     const PAGE_URL = "https://www.aeromarkt.net/avionik-instrumente";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90005">Bendix/King KX 155 NAV/COM</a>
-          <p>Gebrauchtes Funkgerät, voll funktionsfähig, guter Zustand.</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>${shopwarePartItem({
+      manufacturer: "Bendix", model: "KX 155 NAV/COM"
+    })}</body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].price).toBeNull();
     expect(result.listings[0].priceNegotiable).toBe(true);
   });
 
-  it("filters out logo and icon images in parts", () => {
+  it("filters out logo and banner images in parts", () => {
     const PAGE_URL = "https://www.aeromarkt.net/triebwerke";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90006">Continental IO-360 200PS</a>
-          <p>Motor nach Grundüberholung, 50 TSN. € 32.000</p>
-          <img src="/static/logo-small.png">
-          <img src="/uploads/io360_photo.jpg">
-          <img src="/static/icon-engine.svg">
+    const html = `<html><body>
+      <div class="listview-item">
+        <div class="new-lfz-description">
+          <h2><strong>Continental</strong></h2>
+          <h3><strong>IO-360 200PS</strong></h3>
         </div>
-      </body></html>
-    `;
+        <p class="price"><span>32.000 €</span></p>
+        <img class="img-fluid" src="/static/logo-small.png">
+        <img class="img-fluid" src="/uploads/io360_photo.jpg">
+        <img class="img-fluid" src="/static/banner-ad.gif">
+      </div>
+    </body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(1);
     expect(result.listings[0].imageUrls.length).toBe(1);
@@ -1042,15 +944,12 @@ describe("parseAeromarktPartsPage", () => {
 
   it("detects next page link", () => {
     const PAGE_URL = "https://www.aeromarkt.net/avionik-instrumente";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90007">Garmin GMA 345 Audio Panel</a>
-          <p>Bluetooth Audio Panel, neuwertig. € 3.200</p>
-        </div>
-        <a href="/avionik-instrumente?page=2">weiter</a>
-      </body></html>
-    `;
+    const html = `<html><body>
+      ${shopwarePartItem({ manufacturer: "Garmin", model: "GMA 345", price: "3.200 €" })}
+      <ul class="pagination">
+        <li class="page-next"><a class="page-link" href="?page=2">weiter</a></li>
+      </ul>
+    </body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.nextPageUrl).toContain("page=2");
   });
@@ -1071,18 +970,10 @@ describe("parseAeromarktPartsPage", () => {
 
   it("parses multiple parts listings", () => {
     const PAGE_URL = "https://www.aeromarkt.net/avionik-instrumente";
-    const html = `
-      <html><body>
-        <div class="listing-item">
-          <a href="/inserat/90010">Garmin G5 EFIS</a>
-          <p>Electronic Flight Instrument, neuwertig. € 2.800</p>
-        </div>
-        <div class="listing-item">
-          <a href="/inserat/90011">Becker AR 6201 COM</a>
-          <p>8.33 kHz Funkgerät, gebraucht, funktionsfähig. € 950</p>
-        </div>
-      </body></html>
-    `;
+    const html = `<html><body>
+      ${shopwarePartItem({ manufacturer: "Garmin", model: "G5 EFIS", price: "2.800 €" })}
+      ${shopwarePartItem({ manufacturer: "Becker", model: "AR 6201 COM", price: "950 €" })}
+    </body></html>`;
     const result = parseAeromarktPartsPage(html, PAGE_URL, SOURCE);
     expect(result.listings.length).toBe(2);
     expect(result.listings[0].title).toBe("Garmin G5 EFIS");

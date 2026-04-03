@@ -201,8 +201,9 @@ export function extractLocation(text: string): string | null {
     return cleanText(structuredMatch[1]);
   }
 
-  // German postal code + city: "86150 Augsburg"
-  const postalMatch = text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ]?[a-zäöüß]+){0,2})/);
+  // German postal code + city: "86150 Augsburg", "86150 Bad Aibling"
+  // Extra words must start with uppercase to avoid capturing lowercase description text
+  const postalMatch = text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ][a-zäöüß]+){0,2})/);
   if (postalMatch) {
     return cleanText(`${postalMatch[1]} ${postalMatch[2]}`);
   }
