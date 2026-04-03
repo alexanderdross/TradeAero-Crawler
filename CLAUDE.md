@@ -137,7 +137,7 @@ node dist/index.js --source aeromarkt --target parts
 | Crawl Helmut's UL Seiten | helmuts-ul-seiten.de | 06:00 UTC daily | No | 60 min |
 | Crawl Aircraft24.de | aircraft24.de | 07:00 UTC daily | Yes | 60 min |
 | Crawl Aeromarkt.net | aeromarkt.net | 08:00 UTC daily | Yes | 60 min |
-| Seed Aircraft Reference Specs | -- | Manual only | No | 30 min |
+| Seed Aircraft Reference Specs | -- | Weekly Sun 7AM + Manual | No | 60 min |
 
 All crawler workflows use quoted workflow input interpolation (`"${{ github.event.inputs.target || 'all' }}"`) to prevent injection.
 
