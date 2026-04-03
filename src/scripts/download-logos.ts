@@ -8,12 +8,10 @@ import * as path from "path";
 /**
  * Download aircraft manufacturer logos for ALL manufacturers in aircraft_reference_specs.
  *
- * Strategy:
- * 1. Fetch all unique manufacturers from aircraft_reference_specs
- * 2. Skip manufacturers that already have a logo file
- * 3. Ask Claude Haiku for the best Wikimedia Commons logo URL for each manufacturer
- * 4. Download via Bright Data proxy
- * 5. Save to TradeAero-Refactor/public/assets/logos/{slug}-logo.png
+ * Strategy (3-tier fallback):
+ * 1. Wikimedia Commons — Claude Haiku finds the best logo URL
+ * 2. Clearbit Logo API — free, by manufacturer website domain
+ * 3. Google Favicon — last resort, by manufacturer website domain
  *
  * Usage: npx tsx src/scripts/download-logos.ts
  * Requires: BRIGHT_DATA_PROXY_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
@@ -30,6 +28,43 @@ function nameToSlug(name: string): string {
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/** Check if buffer contains a valid PNG or JPEG image > minSize bytes */
+function isValidImage(buf: Buffer, minSize: number = 2000): boolean {
+  if (buf.length < minSize) return false;
+  // Not HTML
+  if (buf.toString("utf8", 0, 15).includes("<!DOCTYPE") || buf.toString("utf8", 0, 5) === "<html") return false;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const isSvg = buf.toString("utf8", 0, 100).includes("<svg");
+  return isPng || isJpeg || isSvg;
+}
+
+/** Download an image URL via Bright Data proxy with timeout */
+async function downloadImage(
+  url: string,
+  agent: any,
+  timeoutMs: number = 15000
+): Promise<Buffer | null> {
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        Accept: "image/png,image/webp,image/jpeg,image/*,*/*;q=0.8",
+        Referer: "https://www.google.com/",
+      },
+      // @ts-ignore
+      agent,
+      signal: AbortSignal.timeout(timeoutMs),
+    } as any);
+
+    if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return buf;
+  } catch {
+    return null;
+  }
 }
 
 async function main() {
@@ -72,13 +107,11 @@ async function main() {
     const slug = nameToSlug(mfg);
     const outPath = path.join(OUTPUT_DIR, `${slug}-logo.png`);
 
-    // Skip if a valid PNG/JPEG logo already exists (check magic bytes, not just size)
+    // Skip if a valid PNG/JPEG logo already exists
     if (fs.existsSync(outPath)) {
       const existing = fs.readFileSync(outPath);
-      const isPng = existing[0] === 0x89 && existing[1] === 0x50 && existing[2] === 0x4e && existing[3] === 0x47;
-      const isJpeg = existing[0] === 0xff && existing[1] === 0xd8 && existing[2] === 0xff;
-      if ((isPng || isJpeg) && existing.length > 2000) {
-        console.log(`  SKIP ${mfg} (valid ${isPng ? "PNG" : "JPEG"}: ${(existing.length / 1024).toFixed(1)}KB)`);
+      if (isValidImage(existing)) {
+        console.log(`  SKIP ${mfg} (valid logo: ${(existing.length / 1024).toFixed(1)}KB)`);
         skipped++;
         continue;
       }
@@ -87,99 +120,82 @@ async function main() {
       console.log(`  CLEAN ${mfg} (removed invalid file: ${existing.length} bytes)`);
     }
 
-    // 2. Ask Claude for the best logo URL
     try {
+      // ── TIER 1: Ask Claude for Wikimedia logo URL + manufacturer website domain ──
       const response = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 256,
+        max_tokens: 300,
         temperature: 0,
-        system: `You are a helper that finds aircraft manufacturer logo URLs from Wikimedia Commons.
-Given an aircraft manufacturer name, return the BEST direct URL to a PNG thumbnail of their logo from Wikimedia Commons.
+        system: `You are a helper that finds aircraft manufacturer logos.
+Given an aircraft manufacturer name, return TWO lines:
+Line 1: The best direct URL to a PNG thumbnail of their logo from Wikimedia Commons (upload.wikimedia.org), or "NONE" if not confident.
+Line 2: The manufacturer's official website domain (e.g., "cessna.txtav.com" or "www.diamond-air.at"), or "NONE" if unknown.
 
 Rules:
-- URL must be from upload.wikimedia.org
-- Use the /thumb/ PNG format: https://upload.wikimedia.org/wikipedia/commons/thumb/{path}/200px-{filename}.png
-- Or the /wikipedia/en/thumb/ path for English Wikipedia logos
-- If you're not confident a logo exists on Wikimedia, return "NONE"
-- Return ONLY the URL or "NONE", nothing else`,
+- For Wikimedia URLs, use /thumb/ PNG format: https://upload.wikimedia.org/wikipedia/commons/thumb/{path}/200px-{filename}.png
+- Return ONLY two lines, no other text.`,
         messages: [{
           role: "user",
           content: `Aircraft manufacturer: ${mfg}`,
         }],
       });
 
-      const logoUrl = (response.content[0].type === "text" ? response.content[0].text : "").trim();
+      const text = (response.content[0].type === "text" ? response.content[0].text : "").trim();
+      const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+      const wikimediaUrl = lines[0] && lines[0] !== "NONE" && lines[0].startsWith("https://upload.wikimedia.org") ? lines[0] : null;
+      const websiteDomain = lines[1] && lines[1] !== "NONE" ? lines[1].replace(/^https?:\/\//, "").replace(/\/.*$/, "") : null;
 
-      if (!logoUrl || logoUrl === "NONE" || !logoUrl.startsWith("https://upload.wikimedia.org")) {
-        console.log(`  SKIP ${mfg} (no Wikimedia logo found)`);
-        fail++;
-        await new Promise((r) => setTimeout(r, 100));
-        continue;
-      }
+      let downloaded = false;
 
-      // 3. Download via Bright Data proxy
-      const imgResponse = await fetch(logoUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          Accept: "image/png,image/webp,image/*,*/*;q=0.8",
-          Referer: "https://commons.wikimedia.org/",
-        },
-        // @ts-ignore
-        agent,
-        signal: AbortSignal.timeout(15000),
-      } as any);
-
-      if (!imgResponse.ok) {
-        // Rate limited — wait and retry once
-        if (imgResponse.status === 429) {
-          console.log(`  RETRY ${mfg}: Rate limited, waiting 5s...`);
-          await new Promise((r) => setTimeout(r, 5000));
-          const retry = await fetch(logoUrl, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-              Accept: "image/png,image/webp,image/*,*/*;q=0.8",
-              Referer: "https://commons.wikimedia.org/",
-            },
-            // @ts-ignore
-            agent,
-            signal: AbortSignal.timeout(15000),
-          } as any);
-          if (retry.ok) {
-            const buf = Buffer.from(await retry.arrayBuffer());
-            if (buf.length > 500 && !buf.toString("utf8", 0, 15).includes("<!DOCTYPE")) {
-              fs.writeFileSync(outPath, buf);
-              console.log(`  OK   ${mfg} (retry) → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
-              ok++;
-              await new Promise((r) => setTimeout(r, 2000));
-              continue;
-            }
-          }
+      // ── Try Wikimedia ──
+      if (wikimediaUrl) {
+        const buf = await downloadImage(wikimediaUrl, agent);
+        if (buf && isValidImage(buf)) {
+          fs.writeFileSync(outPath, buf);
+          console.log(`  OK   ${mfg} [wikimedia] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
+          ok++;
+          downloaded = true;
+        } else if (buf === null) {
+          console.log(`  ──   ${mfg} [wikimedia] failed (download error), trying fallbacks...`);
+        } else {
+          console.log(`  ──   ${mfg} [wikimedia] invalid image, trying fallbacks...`);
         }
-        console.log(`  FAIL ${mfg}: HTTP ${imgResponse.status} for ${logoUrl}`);
-        fail++;
-        continue;
       }
 
-      const buffer = Buffer.from(await imgResponse.arrayBuffer());
-
-      // Validate: must be > 500 bytes and not HTML
-      if (buffer.length < 500) {
-        console.log(`  FAIL ${mfg}: Too small (${buffer.length} bytes)`);
-        fail++;
-        continue;
+      // ── TIER 2: Clearbit Logo API ──
+      if (!downloaded && websiteDomain) {
+        const clearbitUrl = `https://logo.clearbit.com/${websiteDomain}`;
+        const buf = await downloadImage(clearbitUrl, agent);
+        if (buf && isValidImage(buf, 500)) {
+          fs.writeFileSync(outPath, buf);
+          console.log(`  OK   ${mfg} [clearbit] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
+          ok++;
+          downloaded = true;
+        } else {
+          console.log(`  ──   ${mfg} [clearbit] no logo for ${websiteDomain}, trying favicon...`);
+        }
       }
-      if (buffer.toString("utf8", 0, 15).includes("<!DOCTYPE") || buffer.toString("utf8", 0, 5) === "<html") {
-        console.log(`  FAIL ${mfg}: Got HTML, not image`);
-        fail++;
-        continue;
+
+      // ── TIER 3: Google Favicon (128px) ──
+      if (!downloaded && websiteDomain) {
+        const faviconUrl = `https://www.google.com/s2/favicons?domain=${websiteDomain}&sz=128`;
+        const buf = await downloadImage(faviconUrl, agent);
+        // Google favicon is smaller — accept > 500 bytes
+        if (buf && buf.length > 500 && !buf.toString("utf8", 0, 15).includes("<!DOCTYPE")) {
+          fs.writeFileSync(outPath, buf);
+          console.log(`  OK   ${mfg} [favicon] → ${slug}-logo.png (${(buf.length / 1024).toFixed(1)}KB)`);
+          ok++;
+          downloaded = true;
+        }
       }
 
-      fs.writeFileSync(outPath, buffer);
-      console.log(`  OK   ${mfg} → ${slug}-logo.png (${(buffer.length / 1024).toFixed(1)}KB)`);
-      ok++;
+      if (!downloaded) {
+        console.log(`  FAIL ${mfg} (no logo found from any source)`);
+        fail++;
+      }
 
-      // Polite delay (1.5s to avoid Wikimedia rate limiting)
-      await new Promise((r) => setTimeout(r, 1500));
+      // Polite delay between manufacturers (3s to avoid all rate limits)
+      await new Promise((r) => setTimeout(r, 3000));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`  FAIL ${mfg}: ${msg}`);
