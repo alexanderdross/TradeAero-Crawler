@@ -1,0 +1,50 @@
+name: "Download Manufacturer Logos"
+
+on:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Crawler
+        uses: actions/checkout@v4
+
+      - name: Checkout Refactor (for logo output)
+        uses: actions/checkout@v4
+        with:
+          repository: alexanderdross/TradeAero-Refactor
+          path: TradeAero-Refactor
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Download logos via Bright Data proxy
+        env:
+          BRIGHT_DATA_PROXY_URL: ${{ secrets.BRIGHT_DATA_PROXY_URL }}
+        run: npx tsx src/scripts/download-logos.ts
+
+      - name: List downloaded logos
+        run: ls -la TradeAero-Refactor/public/assets/logos/*-logo* || echo "No logos found"
+
+      - name: Upload logos as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manufacturer-logos
+          path: TradeAero-Refactor/public/assets/logos/*-logo*
+          retention-days: 30
