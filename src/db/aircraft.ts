@@ -53,30 +53,55 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
  */
 type ManufacturerMatch = { id: number; name: string; confidence: "high" | "medium" | "low" };
 
-async function resolveManufacturer(title: string): Promise<ManufacturerMatch> {
+async function resolveManufacturer(title: string, hint?: string): Promise<ManufacturerMatch> {
   const mfgMap = await getManufacturerMap();
   const titleLower = title.replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "").toLowerCase().trim();
+
+  // Build a combined search string: hint (from URL) + title
+  // The hint is more reliable (no garbled price/spec text mixed in)
+  const hintLower = hint ? hint.toLowerCase().trim() : "";
+  const searchText = hintLower ? `${hintLower} ${titleLower}` : titleLower;
 
   // 1. Check existing DB manufacturers → HIGH confidence
   // Sort by name length descending to match "Comco Ikarus" before "Ikarus"
   const dbEntries = [...mfgMap.entries()].sort((a, b) => b[0].length - a[0].length);
   for (const [nameLower, id] of dbEntries) {
-    if (nameLower.length >= 3 && titleLower.includes(nameLower)) {
+    if (nameLower.length >= 3 && searchText.includes(nameLower)) {
       const properName = [...mfgMap.entries()].find(([k]) => k === nameLower)?.[0] ?? nameLower;
       return { id, name: properName, confidence: "high" };
     }
   }
 
   // 2. Check reference specs table → HIGH confidence
+  // Also try matching just the first word of multi-word manufacturer names
+  // e.g. reference has "Diamond Aircraft" but title just says "Diamond DA40NG"
   const refSpecsCache = await loadRefSpecManufacturers();
   for (const refMfg of refSpecsCache) {
-    if (refMfg.length >= 3 && titleLower.includes(refMfg.toLowerCase())) {
+    if (refMfg.length < 3) continue;
+    const refLower = refMfg.toLowerCase();
+    // Full name match
+    if (searchText.includes(refLower)) {
+      const id = await createManufacturer(refMfg);
+      return { id, name: refMfg, confidence: "high" };
+    }
+    // First-word match for multi-word names (e.g. "Diamond Aircraft" → "diamond")
+    const firstWord = refLower.split(/\s+/)[0];
+    if (firstWord.length >= 4 && searchText.includes(firstWord)) {
       const id = await createManufacturer(refMfg);
       return { id, name: refMfg, confidence: "high" };
     }
   }
 
-  // 3. No match → "Other" (listing saved as draft for admin review)
+  // 3. If hint is present, use it as manufacturer name directly (URL slug is reliable)
+  if (hintLower.length >= 3) {
+    // Capitalise the hint properly (e.g. "diamond" → "Diamond", "czech aircraft works" → "Czech Aircraft Works")
+    const properHint = hint!.replace(/\b\w/g, (c) => c.toUpperCase());
+    const id = await createManufacturer(properHint);
+    logger.info("Resolved manufacturer from URL hint", { hint: properHint, title: title.slice(0, 60) });
+    return { id, name: properHint, confidence: "medium" };
+  }
+
+  // 4. No match → "Other" (listing saved as draft for admin review)
   const id = await createManufacturer("Other");
   logger.warn("Could not resolve manufacturer — listing saved as draft", { title: title.slice(0, 80) });
   return { id, name: "Other", confidence: "low" };
@@ -478,7 +503,7 @@ export async function upsertAircraftListing(
   }
 
   // Resolve manufacturer (needed for both paths)
-  const manufacturer = await resolveManufacturer(listing.title);
+  const manufacturer = await resolveManufacturer(listing.title, listing.manufacturerHint);
 
   if (existing) {
     // ── UPDATE PATH (fast: skip translation, re-upload external images) ──

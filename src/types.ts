@@ -85,6 +85,12 @@ export interface ParsedAircraftListing {
   contactPhone: string | null;
   /** Image URLs (absolute) */
   imageUrls: string[];
+  /**
+   * Optional manufacturer hint extracted from the source URL or page context
+   * (e.g. aircraft24 URL path: /singleprop/diamond/... → "diamond").
+   * Passed to resolveManufacturer() to improve matching accuracy.
+   */
+  manufacturerHint?: string;
 }
 
 /** Raw parsed parts listing from Helmut's UL Seiten */
