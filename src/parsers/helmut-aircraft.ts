@@ -121,6 +121,8 @@ function parseBlock(
     year: specs.year,
     engine: specs.engine,
     totalTime: specs.totalTime,
+    engineHours: specs.engineHours,
+    cycles: specs.cycles,
     mtow: specs.mtow,
     rescueSystem: specs.rescue,
     annualInspection: specs.jnp,
@@ -143,6 +145,8 @@ interface ExtractedSpecs {
   year: number | null;
   engine: string | null;
   totalTime: number | null;
+  engineHours: number | null;
+  cycles: number | null;
   mtow: number | null;
   rescue: string | null;
   jnp: string | null;
@@ -154,6 +158,8 @@ function extractSpecs(text: string): ExtractedSpecs {
     year: null,
     engine: null,
     totalTime: null,
+    engineHours: null,
+    cycles: null,
     mtow: null,
     rescue: null,
     jnp: null,
@@ -168,11 +174,19 @@ function extractSpecs(text: string): ExtractedSpecs {
   const engineMatch = text.match(/Motor[:\s]*([^•\n]+)/i);
   if (engineMatch) specs.engine = cleanText(engineMatch[1]);
 
-  // Betriebsstunden / TT (total time / flight hours)
+  // Betriebsstunden / TT (total airframe time / TTAF)
   const ttMatch =
-    text.match(/(?:Betriebsstunden|TT|Flugstunden)[:\s]*([\d.,]+)/i) ??
+    text.match(/(?:Betriebsstunden|TT(?:AF)?|Flugstunden)[:\s]*([\d.,]+)/i) ??
     text.match(/(\d+)\s*(?:Stunden|Std|h)\b/i);
   if (ttMatch) specs.totalTime = extractNumber(ttMatch[1]);
+
+  // Motorstunden / TTSN (engine hours — separate from airframe time)
+  const engineHoursMatch = text.match(/(?:Motorstunden|TTSN|Motorbetriebsstunden|Motor-Std|Motor-BZ)[:\s]*([\d.,]+)/i);
+  if (engineHoursMatch) specs.engineHours = extractNumber(engineHoursMatch[1]);
+
+  // Landungen / Starts / Zyklen (landings / cycles)
+  const cyclesMatch = text.match(/(?:Landungen|Starts|Zyklen|LDG|Ldg\.?)[:\s]*([\d.,]+)/i);
+  if (cyclesMatch) specs.cycles = extractNumber(cyclesMatch[1]);
 
   // MTOW
   const mtowMatch = text.match(/MTOW[:\s]*([\d.,]+)\s*kg/i);

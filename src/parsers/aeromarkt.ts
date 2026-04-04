@@ -99,6 +99,17 @@ export function parseAeromarktAircraftPage(
         }
       });
 
+      // Extract specs visible in the index card text
+      const cardText = $item.text();
+      const ttCardMatch = cardText.match(/(?:TTAF|TT(?:AF)?|Betriebsstunden|Flugstunden)[:\s]*([\d.,]+)/i);
+      const totalTime = ttCardMatch ? parseFloat(ttCardMatch[1].replace(/\./g, "").replace(",", ".")) : null;
+      const engineCardMatch = cardText.match(/(?:Motorstunden|TTSN|TTE)[:\s]*([\d.,]+)/i);
+      const engineHours = engineCardMatch ? parseFloat(engineCardMatch[1].replace(/\./g, "").replace(",", ".")) : null;
+      const cyclesCardMatch = cardText.match(/(?:Landungen|LDG|Ldg\.?)[:\s]*([\d.,]+)/i);
+      const cycles = cyclesCardMatch ? parseInt(cyclesCardMatch[1].replace(/\./g, ""), 10) : null;
+      const locationCardMatch = cardText.match(/(?:Standort|Ort)[:\s]*([A-Za-zÄÖÜäöüß\s\-,]+)/i);
+      const location = locationCardMatch ? locationCardMatch[1].trim().split(/[\n,]/)[0].trim() : null;
+
       listings.push({
         sourceId: detailUrl,
         sourceUrl: detailUrl,
@@ -108,14 +119,16 @@ export function parseAeromarktAircraftPage(
         description: buildDescription(manufacturer, model, year, price, priceNegotiable),
         year,
         engine: null,
-        totalTime: null,
+        totalTime,
+        engineHours,
+        cycles,
         mtow: null,
         rescueSystem: null,
         annualInspection: null,
         dulvRef: null,
         price,
         priceNegotiable,
-        location: null,
+        location,
         city: null,
         airfieldName: null,
         icaoCode: null,
@@ -247,4 +260,75 @@ export function parseAeromarktPartsPage(
   });
 
   return { listings, nextPageUrl };
+}
+
+/**
+ * Parse a single aeromarkt.net aircraft detail page.
+ * Returns enriched fields: TTAF, engine hours, cycles, annual inspection, location, engine.
+ * Merges into an existing ParsedAircraftListing (partial update pattern).
+ */
+export function parseAeromarktAircraftDetail(
+  html: string,
+  pageUrl: string,
+  existing: ParsedAircraftListing
+): ParsedAircraftListing {
+  const $ = cheerio.load(html);
+  const text = $("body").text().replace(/\s+/g, " ");
+
+  const parseNum = (s: string) => {
+    const n = parseFloat(s.replace(/\./g, "").replace(",", "."));
+    return isNaN(n) ? null : n;
+  };
+
+  // TTAF / Betriebsstunden
+  let totalTime = existing.totalTime;
+  const ttMatch = text.match(/(?:Betriebsstunden|TTAF|TT(?:AF)?|Flugstunden)[:\s]*([\d.,]+)/i);
+  if (ttMatch) totalTime = parseNum(ttMatch[1]);
+
+  // Engine hours / Motorstunden
+  let engineHours = existing.engineHours;
+  const ehMatch = text.match(/(?:Motorstunden|TTSN|TTE|Motorbetriebs)[:\s]*([\d.,]+)/i);
+  if (ehMatch) engineHours = parseNum(ehMatch[1]);
+
+  // Cycles / Landungen
+  let cycles = existing.cycles;
+  const cyclesMatch = text.match(/(?:Landungen|LDG|Ldg\.?|Zyklen)[:\s]*([\d.,]+)/i);
+  if (cyclesMatch) cycles = parseInt(cyclesMatch[1].replace(/\./g, ""), 10) || null;
+
+  // Annual inspection — Jahresnachprüfung, JNP, TP, HU
+  let annualInspection = existing.annualInspection;
+  const annualMatch = text.match(/(?:Jahresnachpr[üu]fung|JNP|TP|HU)[:\s]*([\d./]+(?:\s*\d{2,4})?)/i);
+  if (annualMatch) annualInspection = annualMatch[1].trim();
+
+  // Engine description
+  let engine = existing.engine;
+  const engineDescMatch = text.match(/(?:Triebwerk|Motortyp|Motor)[:\s]*([^;\n,.]{5,60})/i);
+  if (engineDescMatch) engine = engineDescMatch[1].trim();
+
+  // Location
+  let location = existing.location;
+  const locMatch = text.match(/(?:Standort|Heimatflugplatz)[:\s]*([^\n;,]{3,60})/i);
+  if (locMatch) location = locMatch[1].trim();
+
+  // Images from detail page (may have more than index page)
+  const detailImages: string[] = [];
+  $("img").each((_, el) => {
+    const src = $(el).attr("src") ?? $(el).attr("data-src");
+    if (src && !src.includes("logo") && !src.includes("icon") && !src.includes("no_image") && !src.includes("banner")) {
+      const abs = src.startsWith("http") ? src : `https://www.aeromarkt.net${src.startsWith("/") ? "" : "/"}${src}`;
+      detailImages.push(abs);
+    }
+  });
+
+  return {
+    ...existing,
+    sourceUrl: pageUrl,
+    totalTime: totalTime ?? existing.totalTime,
+    engineHours: engineHours ?? existing.engineHours,
+    cycles: cycles ?? existing.cycles,
+    annualInspection: annualInspection ?? existing.annualInspection,
+    engine: engine ?? existing.engine,
+    location: location ?? existing.location,
+    imageUrls: detailImages.length > existing.imageUrls.length ? detailImages : existing.imageUrls,
+  };
 }

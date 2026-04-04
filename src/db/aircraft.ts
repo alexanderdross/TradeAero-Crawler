@@ -674,6 +674,8 @@ async function mapToAircraftRow(
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
+    engine_hours: listing.engineHours && listing.engineHours > 0 ? listing.engineHours : null,
+    cycles: listing.cycles && listing.cycles > 0 ? listing.cycles : null,
     max_takeoff_weight: listing.mtow?.toString() ?? null,
     max_takeoff_weight_unit: listing.mtow ? "kg" : null,
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,

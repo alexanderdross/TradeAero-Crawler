@@ -138,9 +138,21 @@ function parseListingBlock(
   const yearMatch = text.match(/Bj\.?\s*:?\s*(\d{4})/i);
   const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
 
-  // Extract TTAF: "TTAF: 1234" or "TT: 1234"
-  const ttMatch = text.match(/(?:TTAF|TT|TSN)[:\s]*([\d.,]+)/i);
+  // Extract TTAF: "TTAF: 1234" or "TT: 1234" or "TSN: 1234"
+  const ttMatch = text.match(/(?:TTAF|TT(?:AF)?|TSN)[:\s]*([\d.,]+)/i);
   const totalTime = ttMatch ? parseFloat(ttMatch[1].replace(/\./g, "").replace(",", ".")) : null;
+
+  // Extract engine hours: "TTE: 1234" or "TSOH: 1234" or "TTSN: 1234" or "Motorstunden: 1234"
+  const engineMatch = text.match(/(?:TTE|TSOH|TTSN|Motorstunden|Motor)[:\s]*([\d.,]+)/i);
+  const engineHours = engineMatch ? parseFloat(engineMatch[1].replace(/\./g, "").replace(",", ".")) : null;
+
+  // Extract landings/cycles: "LDG: 1234" or "Ldg.: 1234" or "Landungen: 1234"
+  const cyclesMatch = text.match(/(?:LDG|Ldg\.?|Landungen|Zyklen)[:\s]*([\d.,]+)/i);
+  const cycles = cyclesMatch ? parseInt(cyclesMatch[1].replace(/\./g, ""), 10) : null;
+
+  // Extract annual inspection: "TP: 12/2025" or "JNP: 2025" or "Prüfung: 2025" or "HU: 2025"
+  const annualMatch = text.match(/(?:TP|JNP|HU|Jahresnachpr[üu]fung|Prüfung)[:\s]*([\d./]+(?:\s*\d{4})?)/i);
+  const annualInspection = annualMatch ? annualMatch[1].trim() : null;
 
   // Extract price: "EUR 89.000" or "€ 89.000" or "89.000 EUR"
   const priceInfo = extractPrice(text);
@@ -178,9 +190,11 @@ function parseListingBlock(
     year,
     engine: null,
     totalTime,
+    engineHours,
+    cycles,
     mtow: null,
     rescueSystem: null,
-    annualInspection: null,
+    annualInspection,
     dulvRef: null,
     price: priceInfo.amount,
     priceNegotiable: priceInfo.negotiable,
