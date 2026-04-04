@@ -110,6 +110,19 @@ export function parseAeromarktAircraftPage(
       const locationCardMatch = cardText.match(/(?:Standort|Ort)[:\s]*([A-Za-zÄÖÜäöüß\s\-,]+)/i);
       const location = locationCardMatch ? locationCardMatch[1].trim().split(/[\n,]/)[0].trim() : null;
 
+      // Extract city and ICAO from location string: "München (EDDM)", "Strausberg/EDAY"
+      let cityCard: string | null = null;
+      let icaoCard: string | null = null;
+      if (location) {
+        const icaoParenMatch = location.match(/\(([A-Z]{4})\)/);
+        if (icaoParenMatch) {
+          icaoCard = icaoParenMatch[1];
+          cityCard = location.replace(/\s*\([A-Z]{4}\)/, "").trim().split(/[/,]/)[0].trim() || null;
+        } else {
+          cityCard = location.split(/[/(,]/)[0].trim() || null;
+        }
+      }
+
       listings.push({
         sourceId: detailUrl,
         sourceUrl: detailUrl,
@@ -129,9 +142,9 @@ export function parseAeromarktAircraftPage(
         price,
         priceNegotiable,
         location,
-        city: null,
+        city: cityCard,
         airfieldName: null,
-        icaoCode: null,
+        icaoCode: icaoCard,
         contactName: null,
         contactEmail: null,
         contactPhone: null,
@@ -141,6 +154,16 @@ export function parseAeromarktAircraftPage(
         airworthy: null,
         avionicsText: null,
         country: null,
+        emptyWeight: null,
+        maxTakeoffWeight: null,
+        fuelCapacity: null,
+        fuelType: null,
+        cruiseSpeed: null,
+        maxSpeed: null,
+        maxRange: null,
+        serviceCeiling: null,
+        climbRate: null,
+        fuelConsumption: null,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -359,6 +382,83 @@ export function parseAeromarktAircraftDetail(
   const locMatch = text.match(/(?:Standort|Heimatflugplatz)[:\s]*([^\n;,]{3,60})/i);
   if (locMatch) location = locMatch[1].trim();
 
+  // Parse city and ICAO from location: "München (EDDM)", "Strausberg EDAY"
+  let city = existing.city;
+  let icaoCode = existing.icaoCode;
+  const locStr = location ?? "";
+  const icaoParenMatchDetail = locStr.match(/\(([A-Z]{4})\)/);
+  if (icaoParenMatchDetail) {
+    icaoCode = icaoParenMatchDetail[1];
+    city = locStr.replace(/\s*\([A-Z]{4}\)/, "").trim().split(/[/,]/)[0].trim() || city;
+  } else if (locStr) {
+    // Try slash notation: "Strausberg/EDAY"
+    const slashIcaoDetailMatch = locStr.match(/\/([A-Z]{4})$/);
+    if (slashIcaoDetailMatch) {
+      icaoCode = slashIcaoDetailMatch[1];
+      city = locStr.replace(/\/[A-Z]{4}$/, "").trim() || city;
+    } else {
+      // Simple location — take first part before any separator
+      const simplCity = locStr.split(/[/(,]/)[0].trim();
+      if (simplCity && simplCity.length >= 2) city = simplCity;
+    }
+  }
+  // Fallback: scan full text for ICAO codes
+  if (!icaoCode) {
+    const icaoDetailFallback = text.match(/\b((?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2})\b/);
+    if (icaoDetailFallback) icaoCode = icaoDetailFallback[1];
+  }
+
+  // Empty weight / Leergewicht
+  let emptyWeight = existing.emptyWeight;
+  const ewMatch = text.match(/(?:Leergewicht|Leermasse)[:\s]*([\d.,]+)\s*kg/i);
+  if (ewMatch) emptyWeight = parseNum(ewMatch[1]);
+
+  // Max takeoff weight / MTOW
+  let maxTakeoffWeight = existing.maxTakeoffWeight;
+  const mtowMatch = text.match(/(?:MTOW|Abflugmasse|Abfluggewicht|MAUW)[:\s]*([\d.,]+)\s*kg/i);
+  if (mtowMatch) maxTakeoffWeight = parseNum(mtowMatch[1]);
+
+  // Fuel capacity / Tankinhalt
+  let fuelCapacity = existing.fuelCapacity;
+  const fuelCapMatch = text.match(/(?:Tankinhalt|Kraftstoffmenge|Tank)[:\s]*([\d.,]+)\s*[lL]/i);
+  if (fuelCapMatch) fuelCapacity = parseNum(fuelCapMatch[1]);
+
+  // Fuel type
+  let fuelType = existing.fuelType;
+  if (/MOGAS|Normalbenzin|Super(?!flug)/i.test(text)) fuelType = "MOGAS";
+  else if (/AVGAS|100LL/i.test(text)) fuelType = "AVGAS";
+  else if (/Jet.?A|Kerosin|Diesel/i.test(text)) fuelType = "Jet-A";
+
+  // Cruise speed / Reisegeschwindigkeit
+  let cruiseSpeed = existing.cruiseSpeed;
+  const cruiseMatch = text.match(/(?:Reisegeschwindigkeit|Reise(?:geschw\.?)?|Vcr)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
+  if (cruiseMatch) cruiseSpeed = parseNum(cruiseMatch[1]);
+
+  // Max speed / Vne / Höchstgeschwindigkeit
+  let maxSpeed = existing.maxSpeed;
+  const maxSpdMatch = text.match(/(?:Höchstgeschwindigkeit|Vne|Vmax)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
+  if (maxSpdMatch) maxSpeed = parseNum(maxSpdMatch[1]);
+
+  // Range / Reichweite
+  let maxRange = existing.maxRange;
+  const rangeMatch = text.match(/(?:Reichweite|Range)[:\s]*([\d.,]+)\s*(?:km|nm)/i);
+  if (rangeMatch) maxRange = parseNum(rangeMatch[1]);
+
+  // Service ceiling / Gipfelhöhe
+  let serviceCeiling = existing.serviceCeiling;
+  const ceilMatch = text.match(/(?:Gipfelhöhe|Dienstgipfelhöhe|Betriebshöhe)[:\s]*([\d.,]+)\s*(?:m|ft)/i);
+  if (ceilMatch) serviceCeiling = parseNum(ceilMatch[1]);
+
+  // Climb rate / Steigleistung
+  let climbRate = existing.climbRate;
+  const climbMatch = text.match(/(?:Steigleistung|Steigrate)[:\s]*([\d.,]+)\s*(?:m\/s|ft\/min)/i);
+  if (climbMatch) climbRate = parseNum(climbMatch[1]);
+
+  // Fuel consumption / Verbrauch
+  let fuelConsumption = existing.fuelConsumption;
+  const consumMatch = text.match(/(?:Verbrauch|Kraftstoffverbrauch)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h)/i);
+  if (consumMatch) fuelConsumption = parseNum(consumMatch[1]);
+
   // Images from detail page (may have more than index page)
   const detailImages: string[] = [];
   $("img").each((_, el) => {
@@ -378,11 +478,23 @@ export function parseAeromarktAircraftDetail(
     annualInspection: annualInspection ?? existing.annualInspection,
     engine: engine ?? existing.engine,
     location: location ?? existing.location,
+    city: city ?? existing.city,
+    icaoCode: icaoCode ?? existing.icaoCode,
     registration: registration ?? existing.registration,
     serialNumber: serialNumber ?? existing.serialNumber,
     airworthy: airworthy ?? existing.airworthy,
     avionicsText: avionicsText ?? existing.avionicsText,
     country: country ?? existing.country,
+    emptyWeight: emptyWeight ?? existing.emptyWeight,
+    maxTakeoffWeight: maxTakeoffWeight ?? existing.maxTakeoffWeight,
+    fuelCapacity: fuelCapacity ?? existing.fuelCapacity,
+    fuelType: fuelType ?? existing.fuelType,
+    cruiseSpeed: cruiseSpeed ?? existing.cruiseSpeed,
+    maxSpeed: maxSpeed ?? existing.maxSpeed,
+    maxRange: maxRange ?? existing.maxRange,
+    serviceCeiling: serviceCeiling ?? existing.serviceCeiling,
+    climbRate: climbRate ?? existing.climbRate,
+    fuelConsumption: fuelConsumption ?? existing.fuelConsumption,
     imageUrls: detailImages.length > existing.imageUrls.length ? detailImages : existing.imageUrls,
   };
 }

@@ -57,6 +57,26 @@ export interface ParsedAircraftListing {
   avionicsText: string | null;
   /** Country of the aircraft (null = assume Germany) */
   country: string | null;
+  /** Empty weight in kg (Leergewicht / Leermasse) */
+  emptyWeight: number | null;
+  /** Max takeoff weight in kg (from structured field, complements mtow) */
+  maxTakeoffWeight: number | null;
+  /** Fuel capacity in litres (Tankinhalt) */
+  fuelCapacity: number | null;
+  /** Fuel type (MOGAS, AVGAS, Jet-A, etc.) */
+  fuelType: string | null;
+  /** Cruise speed in km/h (Reisegeschwindigkeit) */
+  cruiseSpeed: number | null;
+  /** Max speed in km/h (Höchstgeschwindigkeit / Vne) */
+  maxSpeed: number | null;
+  /** Max range in km (Reichweite) */
+  maxRange: number | null;
+  /** Service ceiling in m (Gipfelhöhe) */
+  serviceCeiling: number | null;
+  /** Climb rate in m/s (Steigleistung) */
+  climbRate: number | null;
+  /** Fuel consumption in L/h (Verbrauch) */
+  fuelConsumption: number | null;
   /** Contact name */
   contactName: string | null;
   /** Contact email (deobfuscated) */

@@ -613,6 +613,9 @@ async function mapToAircraftRow(
   const registration = listing.registration ?? extractRegistration(listingFullText) ?? "N/A";
   const serialNumber = listing.serialNumber ?? extractSerialNumber(listingFullText) ?? "N/A";
 
+  // Detect equipment feature IDs from listing text
+  const featureIds = await detectFeatureIds(listingFullText);
+
   return {
     headline: cleanHeadline,
     model,
@@ -651,9 +654,6 @@ async function mapToAircraftRow(
     // Seats
     seats,
 
-    // Fuel type: Rotax engines always use MOGAS
-    fuel_type: listing.engine?.toLowerCase().includes("rotax") ? "MOGAS" : null,
-
     // All 14 locale columns
     ...localeFields,
 
@@ -676,11 +676,33 @@ async function mapToAircraftRow(
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
     engine_hours: listing.engineHours && listing.engineHours > 0 ? listing.engineHours : null,
     cycles: listing.cycles && listing.cycles > 0 ? listing.cycles : null,
-    max_takeoff_weight: listing.mtow?.toString() ?? null,
-    max_takeoff_weight_unit: listing.mtow ? "kg" : null,
+    max_takeoff_weight: listing.mtow?.toString() ?? listing.maxTakeoffWeight?.toString() ?? null,
+    max_takeoff_weight_unit: (listing.mtow || listing.maxTakeoffWeight) ? "kg" : null,
+    empty_weight: listing.emptyWeight?.toString() ?? null,
+    empty_weight_unit: listing.emptyWeight ? "kg" : null,
+    fuel_capacity: listing.fuelCapacity?.toString() ?? null,
+    fuel_capacity_unit: listing.fuelCapacity ? "L" : null,
+    fuel_type: listing.engine?.toLowerCase().includes("rotax") ? "MOGAS" : (listing.fuelType ?? null),
+    cruise_speed: listing.cruiseSpeed?.toString() ?? null,
+    cruise_speed_unit: listing.cruiseSpeed ? "km/h" : null,
+    max_speed: listing.maxSpeed?.toString() ?? null,
+    max_speed_unit: listing.maxSpeed ? "km/h" : null,
+    max_range: listing.maxRange?.toString() ?? null,
+    max_range_unit: listing.maxRange ? "km" : null,
+    service_ceiling: listing.serviceCeiling?.toString() ?? null,
+    service_ceiling_unit: listing.serviceCeiling ? "m" : null,
+    performance_climb_rate: listing.climbRate?.toString() ?? null,
+    performance_climb_rate_unit: listing.climbRate ? "m/s" : null,
+    performance_fuel_consumption: listing.fuelConsumption?.toString() ?? null,
+    performance_fuel_consumption_unit: listing.fuelConsumption ? "L/h" : null,
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
     airworthy: listing.airworthy !== null ? (listing.airworthy ? "yes" : "no") : null,
-    avionics_other: listing.avionicsText ?? null,
+
+    // Avionics — classified into specific columns; reference_specs fills remaining nulls
+    ...classifyAvionicsText(listing.avionicsText ?? null),
+
+    // Equipment features — detected from listing text via aircraft_features DB lookup
+    feature_ids: featureIds.length > 0 ? featureIds : null,
 
     // Images — enriched with per-locale alt text from translations
     images: enrichImagesWithLocalizedAlt(uploadedImages, listing.title, translations),
@@ -756,7 +778,9 @@ function extractAirfieldFromText(text: string): string | null {
  * German ICAO: EDxx, Austrian: LOxx, Swiss: LSxx
  */
 function extractIcaoFromText(text: string): string | null {
-  const match = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b/);
+  // Common European ICAO prefixes: ED=DE, LO=AT, LS=CH, EG=UK, LF=FR, EB=BE,
+  // LP=PT, LE=ES, LK=CZ, EP=PL, EH=NL, LI=IT, EK=DK, ES=SE, EN=NO, EF=FI
+  const match = text.match(/\b((?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2})\b/);
   return match ? match[1] : null;
 }
 
@@ -806,59 +830,330 @@ function extractPhoneFromText(text: string): string | null {
 }
 
 /**
- * German city → federal state mapping for common aviation locations.
- * Used to auto-populate the `state` field when only city is extracted.
+ * City → state/canton/Bundesland code mapping for DACH region (Germany, Austria, Switzerland).
+ * Uses abbreviated codes matching what the StateCombobox stores from the `states` DB table.
+ *
+ * Germany: BY BW HE NW NI SH RP SN BB TH ST MV SL BE HH HB
+ * Austria: W NÖ OÖ S T V K ST B  (Bundesland codes)
+ * Switzerland: ZH BE LU SZ ZG FR SO BS BL SH SG GR AG TG TI VD VS NE GE JU (canton codes)
  */
 const GERMAN_CITY_TO_STATE: Record<string, string> = {
-  // Bavaria
-  "münchen": "Bavaria", "munich": "Bavaria", "augsburg": "Bavaria", "nürnberg": "Bavaria",
-  "regensburg": "Bavaria", "würzburg": "Bavaria", "ingolstadt": "Bavaria", "straubing": "Bavaria",
-  "landshut": "Bavaria", "rosenheim": "Bavaria", "kempten": "Bavaria", "memmingen": "Bavaria",
-  "bayreuth": "Bavaria", "bamberg": "Bavaria", "passau": "Bavaria", "erding": "Bavaria",
-  "fürstenfeldbruck": "Bavaria", "jesenwang": "Bavaria", "oberschleißheim": "Bavaria",
-  // Baden-Württemberg
-  "stuttgart": "Baden-Württemberg", "karlsruhe": "Baden-Württemberg", "freiburg": "Baden-Württemberg",
-  "mannheim": "Baden-Württemberg", "heidelberg": "Baden-Württemberg", "ulm": "Baden-Württemberg",
-  "friedrichshafen": "Baden-Württemberg", "donaueschingen": "Baden-Württemberg",
-  // Hesse
-  "frankfurt": "Hesse", "wiesbaden": "Hesse", "kassel": "Hesse", "darmstadt": "Hesse",
-  "gießen": "Hesse", "marburg": "Hesse", "fulda": "Hesse", "egelsbach": "Hesse",
-  // North Rhine-Westphalia
-  "köln": "North Rhine-Westphalia", "düsseldorf": "North Rhine-Westphalia", "dortmund": "North Rhine-Westphalia",
-  "essen": "North Rhine-Westphalia", "bonn": "North Rhine-Westphalia", "münster": "North Rhine-Westphalia",
-  "aachen": "North Rhine-Westphalia", "bielefeld": "North Rhine-Westphalia",
-  // Lower Saxony
-  "hannover": "Lower Saxony", "braunschweig": "Lower Saxony", "osnabrück": "Lower Saxony",
-  "oldenburg": "Lower Saxony", "wolfsburg": "Lower Saxony", "hildesheim": "Lower Saxony",
-  // Schleswig-Holstein
-  "kiel": "Schleswig-Holstein", "lübeck": "Schleswig-Holstein", "flensburg": "Schleswig-Holstein",
-  // Rhineland-Palatinate
-  "mainz": "Rhineland-Palatinate", "koblenz": "Rhineland-Palatinate", "trier": "Rhineland-Palatinate",
-  "speyer": "Rhineland-Palatinate",
-  // Saxony
-  "dresden": "Saxony", "leipzig": "Saxony", "chemnitz": "Saxony",
-  // Brandenburg
-  "potsdam": "Brandenburg", "strausberg": "Brandenburg", "cottbus": "Brandenburg",
-  // Thuringia
-  "erfurt": "Thuringia", "jena": "Thuringia", "weimar": "Thuringia",
-  // Saxony-Anhalt
-  "magdeburg": "Saxony-Anhalt", "halle": "Saxony-Anhalt",
-  // Mecklenburg-Vorpommern
-  "rostock": "Mecklenburg-Vorpommern", "schwerin": "Mecklenburg-Vorpommern",
-  // Saarland
-  "saarbrücken": "Saarland",
-  // City-states
-  "berlin": "Berlin", "hamburg": "Hamburg", "bremen": "Bremen",
+  // ── Bavaria / Bayern (BY) ─────────────────────────────────────────────────
+  "münchen": "BY", "munich": "BY", "augsburg": "BY", "nürnberg": "BY", "nuremberg": "BY",
+  "regensburg": "BY", "würzburg": "BY", "ingolstadt": "BY", "straubing": "BY",
+  "landshut": "BY", "rosenheim": "BY", "kempten": "BY", "memmingen": "BY",
+  "bayreuth": "BY", "bamberg": "BY", "passau": "BY", "erding": "BY",
+  "fürstenfeldbruck": "BY", "jesenwang": "BY", "oberschleißheim": "BY",
+  "landsberg": "BY", "landsberg am lech": "BY", "kaufbeuren": "BY",
+  "weilheim": "BY", "weilheim in oberbayern": "BY",
+  "garmisch": "BY", "garmisch-partenkirchen": "BY",
+  "traunstein": "BY", "altötting": "BY", "deggendorf": "BY",
+  "schwabach": "BY", "ansbach": "BY", "fürth": "BY",
+  "erlangen": "BY", "hof": "BY", "schweinfurt": "BY", "coburg": "BY",
+  "amberg": "BY", "weiden": "BY", "neumarkt": "BY", "neumarkt in der oberpfalz": "BY",
+  "dachau": "BY", "freising": "BY", "ebersberg": "BY", "starnberg": "BY",
+  "germering": "BY", "puchheim": "BY", "gauting": "BY", "olching": "BY",
+  "gröbenzell": "BY", "maisach": "BY", "neufahrn": "BY", "moosburg": "BY",
+  "vilsbiburg": "BY", "dingolfing": "BY", "landau an der isar": "BY",
+  "plattling": "BY", "regen": "BY", "grafenau": "BY", "freyung": "BY",
+  "pfarrkirchen": "BY", "eggenfelden": "BY", "mühldorf": "BY",
+  "waldkraiburg": "BY", "wasserburg": "BY", "prien": "BY",
+  "aschau": "BY", "traunreut": "BY", "freilassing": "BY",
+  "bad reichenhall": "BY", "berchtesgaden": "BY",
+  "bad aibling": "BY", "bad tölz": "BY", "miesbach": "BY",
+  "wolfratshausen": "BY", "holzkirchen": "BY", "herrsching": "BY",
+  "neuburg": "BY", "neuburg an der donau": "BY",
+  "günzburg": "BY", "illertissen": "BY", "lauingen": "BY",
+  "dillingen": "BY", "dillingen an der donau": "BY",
+  "nördlingen": "BY", "donauwörth": "BY", "aichach": "BY",
+  "schrobenhausen": "BY", "pfaffenhofen": "BY",
+  "füssen": "BY", "immenstadt": "BY", "lindau": "BY",
+  "sonthofen": "BY", "oberstdorf": "BY",
+  "marktoberdorf": "BY", "buchloe": "BY", "türkheim": "BY",
+  "bad wörishofen": "BY", "mindelheim": "BY",
+  "neu-ulm": "BY", "senden": "BY",
+  "haar": "BY", "vaterstetten": "BY", "markt schwaben": "BY",
+  "poing": "BY", "grafing": "BY", "aßling": "BY",
+  // ── Baden-Württemberg (BW) ────────────────────────────────────────────────
+  "stuttgart": "BW", "karlsruhe": "BW", "freiburg": "BW", "freiburg im breisgau": "BW",
+  "mannheim": "BW", "heidelberg": "BW", "ulm": "BW",
+  "friedrichshafen": "BW", "donaueschingen": "BW", "konstanz": "BW",
+  "heilbronn": "BW", "pforzheim": "BW", "reutlingen": "BW",
+  "leutkirch": "BW", "biberach": "BW", "ravensburg": "BW",
+  "tübingen": "BW", "aalen": "BW", "esslingen": "BW",
+  "göppingen": "BW", "heidenheim": "BW", "ludwigsburg": "BW",
+  "offenburg": "BW", "rottweil": "BW", "schwäbisch gmünd": "BW",
+  "schwäbisch hall": "BW", "sigmaringen": "BW", "tuttlingen": "BW",
+  "villingen-schwenningen": "BW", "waiblingen": "BW",
+  "freudenstadt": "BW", "balingen": "BW", "calw": "BW",
+  "sindelfingen": "BW", "böblingen": "BW", "leonberg": "BW",
+  "fellbach": "BW", "schorndorf": "BW", "backnang": "BW",
+  "crailsheim": "BW", "ellwangen": "BW",
+  "überlingen": "BW", "radolfzell": "BW", "singen": "BW",
+  "wangen": "BW", "wangen im allgäu": "BW",
+  "bad saulgau": "BW", "bad waldsee": "BW",
+  "kehl": "BW", "lahr": "BW", "achern": "BW",
+  "bruchsal": "BW", "rastatt": "BW", "ettlingen": "BW",
+  "mosbach": "BW", "sinsheim": "BW", "eberbach": "BW",
+  "bad mergentheim": "BW", "künzelsau": "BW",
+  "nürtingen": "BW", "kirchheim": "BW", "kirchheim unter teck": "BW",
+  "metzingen": "BW", "bad urach": "BW",
+  "albstadt": "BW", "haigerloch": "BW",
+  "meersburg": "BW", "markdorf": "BW",
+  // ── Hesse / Hessen (HE) ──────────────────────────────────────────────────
+  "frankfurt": "HE", "frankfurt am main": "HE",
+  "wiesbaden": "HE", "kassel": "HE", "darmstadt": "HE",
+  "gießen": "HE", "marburg": "HE", "fulda": "HE", "egelsbach": "HE",
+  "offenbach": "HE", "offenbach am main": "HE",
+  "hanau": "HE", "bad homburg": "HE",
+  "rüsselsheim": "HE", "bad hersfeld": "HE",
+  "bensheim": "HE", "büdingen": "HE",
+  "groß-gerau": "HE", "limburg": "HE", "langen": "HE",
+  "wetzlar": "HE", "friedberg": "HE",
+  "butzbach": "HE", "bad nauheim": "HE",
+  "korbach": "HE", "frankenberg": "HE",
+  "eschwege": "HE", "witzenhausen": "HE",
+  "hersfeld": "HE",
+  // ── North Rhine-Westphalia / Nordrhein-Westfalen (NW) ────────────────────
+  "köln": "NW", "cologne": "NW",
+  "düsseldorf": "NW", "dortmund": "NW",
+  "essen": "NW", "bonn": "NW", "münster": "NW",
+  "aachen": "NW", "bielefeld": "NW", "wuppertal": "NW",
+  "bochum": "NW", "duisburg": "NW", "paderborn": "NW",
+  "gelsenkirchen": "NW", "hagen": "NW", "hamm": "NW",
+  "herne": "NW", "krefeld": "NW", "leverkusen": "NW",
+  "mönchengladbach": "NW", "mülheim": "NW", "mülheim an der ruhr": "NW",
+  "oberhausen": "NW", "remscheid": "NW", "solingen": "NW",
+  "bottrop": "NW", "recklinghausen": "NW", "lünen": "NW",
+  "siegen": "NW", "neuss": "NW", "moers": "NW",
+  "gütersloh": "NW", "herford": "NW", "iserlohn": "NW",
+  "witten": "NW", "schwelm": "NW", "velbert": "NW",
+  "kleve": "NW", "wesel": "NW", "dinslaken": "NW",
+  "düren": "NW", "jülich": "NW", "bergheim": "NW",
+  "euskirchen": "NW", "bad godesberg": "NW",
+  "minden": "NW", "detmold": "NW", "lemgo": "NW",
+  "lippstadt": "NW", "soest": "NW", "arnsberg": "NW",
+  "meschede": "NW", "olpe": "NW", "attendorn": "NW",
+  // ── Lower Saxony / Niedersachsen (NI) ────────────────────────────────────
+  "hannover": "NI", "hanover": "NI",
+  "braunschweig": "NI", "brunswick": "NI",
+  "osnabrück": "NI", "oldenburg": "NI", "wolfsburg": "NI",
+  "hildesheim": "NI", "göttingen": "NI", "celle": "NI",
+  "wilhelmshaven": "NI", "delmenhorst": "NI", "emden": "NI",
+  "salzgitter": "NI", "hameln": "NI", "lüneburg": "NI",
+  "wolfenbüttel": "NI", "goslar": "NI",
+  "northeim": "NI", "einbeck": "NI",
+  "cuxhaven": "NI", "bremerhaven": "HB",
+  "stade": "NI", "buxtehude": "NI",
+  "uelzen": "NI", "lüchow": "NI",
+  "nienburg": "NI", "schaumburg": "NI",
+  "lingen": "NI", "nordhorn": "NI", "meppen": "NI",
+  "cloppenburg": "NI", "vechta": "NI",
+  "peine": "NI", "seesen": "NI",
+  "bad harzburg": "NI", "clausthal-zellerfeld": "NI",
+  // ── Schleswig-Holstein (SH) ───────────────────────────────────────────────
+  "kiel": "SH", "lübeck": "SH", "flensburg": "SH",
+  "neumünster": "SH", "husum": "SH", "heide": "SH",
+  "norderstedt": "SH", "pinneberg": "SH",
+  "rendsburg": "SH", "schleswig": "SH", "itzehoe": "SH",
+  "ahrensburg": "SH", "reinbek": "SH",
+  "elmshorn": "SH",
+  "bad segeberg": "SH", "bad oldesloe": "SH",
+  "eutin": "SH", "plön": "SH",
+  "sylt": "SH", "föhr": "SH",
+  // ── Rhineland-Palatinate / Rheinland-Pfalz (RP) ──────────────────────────
+  "mainz": "RP", "koblenz": "RP", "trier": "RP", "speyer": "RP",
+  "kaiserslautern": "RP", "ludwigshafen": "RP",
+  "neustadt an der weinstraße": "RP", "neustadt": "RP",
+  "pirmasens": "RP", "worms": "RP", "zweibrücken": "RP",
+  "bad kreuznach": "RP", "andernach": "RP", "bingen": "RP",
+  "bingen am rhein": "RP",
+  "idar-oberstein": "RP", "landau": "RP", "landau in der pfalz": "RP",
+  "mayen": "RP", "neuwied": "RP", "sinzig": "RP",
+  "frankenthal": "RP", "ingelheim": "RP",
+  "alzey": "RP", "oppenheim": "RP",
+  "cochem": "RP", "zell": "RP",
+  "bitburg": "RP", "prüm": "RP",
+  "bernkastel": "RP", "bernkastel-kues": "RP",
+  // ── Saxony / Sachsen (SN) ─────────────────────────────────────────────────
+  "dresden": "SN", "leipzig": "SN", "chemnitz": "SN",
+  "zwickau": "SN", "plauen": "SN",
+  "görlitz": "SN", "bautzen": "SN", "freiberg": "SN",
+  "grimma": "SN", "meißen": "SN", "riesa": "SN",
+  "hoyerswerda": "SN", "kamenz": "SN",
+  "delitzsch": "SN", "oschatz": "SN", "döbeln": "SN",
+  "annaberg": "SN", "annaberg-buchholz": "SN",
+  "aue": "SN", "stollberg": "SN",
+  // ── Brandenburg (BB) ─────────────────────────────────────────────────────
+  "potsdam": "BB", "strausberg": "BB", "cottbus": "BB",
+  "frankfurt an der oder": "BB", "eberswalde": "BB",
+  "neuruppin": "BB", "oranienburg": "BB",
+  "schwedt": "BB", "senftenberg": "BB",
+  "brandenburg": "BB", "brandenburg an der havel": "BB",
+  "rathenow": "BB", "pritzwalk": "BB",
+  "fürstenwalde": "BB", "eisenhüttenstadt": "BB",
+  "königs wusterhausen": "BB", "zossen": "BB",
+  "luckenwalde": "BB", "jüterbog": "BB",
+  // ── Thuringia / Thüringen (TH) ────────────────────────────────────────────
+  "erfurt": "TH", "jena": "TH", "weimar": "TH",
+  "gera": "TH", "gotha": "TH", "eisenach": "TH",
+  "suhl": "TH", "altenburg": "TH", "nordhausen": "TH",
+  "apolda": "TH", "bad langensalza": "TH",
+  "ilmenau": "TH", "meiningen": "TH",
+  "mühlhausen": "TH", "sondershausen": "TH",
+  "rudolstadt": "TH", "saalfeld": "TH",
+  "sonneberg": "TH", "hildburghausen": "TH",
+  // ── Saxony-Anhalt / Sachsen-Anhalt (ST) ──────────────────────────────────
+  "magdeburg": "ST", "halle": "ST", "dessau": "ST",
+  "dessau-roßlau": "ST", "wittenberg": "ST",
+  "bitterfeld": "ST", "merseburg": "ST",
+  "quedlinburg": "ST", "stendal": "ST",
+  "zeitz": "ST", "aschersleben": "ST",
+  "bernburg": "ST", "halberstadt": "ST",
+  "schönebeck": "ST", "wernigerode": "ST",
+  "sangerhausen": "ST", "weißenfels": "ST",
+  // ── Mecklenburg-Vorpommern (MV) ───────────────────────────────────────────
+  "rostock": "MV", "schwerin": "MV", "greifswald": "MV",
+  "stralsund": "MV", "neubrandenburg": "MV",
+  "wismar": "MV", "güstrow": "MV", "waren": "MV",
+  "bergen": "MV", "ribnitz": "MV", "ribnitz-damgarten": "MV",
+  "heringsdorf": "MV", "usedom": "MV",
+  "ueckermünde": "MV", "demmin": "MV",
+  "anklam": "MV", "wolgast": "MV",
+  // ── Saarland (SL) ─────────────────────────────────────────────────────────
+  "saarbrücken": "SL", "saarlouis": "SL",
+  "homburg": "SL", "neunkirchen": "SL",
+  "merzig": "SL", "st. ingbert": "SL", "völklingen": "SL",
+  // ── City-states (BE / HH / HB) ────────────────────────────────────────────
+  "berlin": "BE", "hamburg": "HH", "bremen": "HB",
+
+  // ── Austria / Österreich ──────────────────────────────────────────────────
+  // Wien (W)
+  "wien": "W", "vienna": "W",
+  // Niederösterreich (NÖ)
+  "st. pölten": "NÖ", "st pölten": "NÖ", "wiener neustadt": "NÖ",
+  "klosterneuburg": "NÖ", "korneuburg": "NÖ", "stockerau": "NÖ",
+  "tulln": "NÖ", "krems": "NÖ", "krems an der donau": "NÖ",
+  "mistelbach": "NÖ", "mödling": "NÖ", "baden bei wien": "NÖ",
+  "amstetten": "NÖ", "waidhofen": "NÖ",
+  "gmünd": "NÖ", "zwettl": "NÖ",
+  "schwechat": "NÖ", "fischamend": "NÖ",
+  // Oberösterreich (OÖ)
+  "linz": "OÖ", "wels": "OÖ", "steyr": "OÖ",
+  "leonding": "OÖ", "traun": "OÖ", "ansfelden": "OÖ",
+  "ried im innkreis": "OÖ", "vöcklabruck": "OÖ",
+  "gmunden": "OÖ", "bad ischl": "OÖ",
+  "braunau": "OÖ", "braunau am inn": "OÖ",
+  "freistadt": "OÖ", "rohrbach": "OÖ",
+  "kirchdorf": "OÖ", "schärding": "OÖ",
+  "perg": "OÖ", "grieskirchen": "OÖ",
+  // Salzburg (S)
+  "salzburg": "S", "hallein": "S",
+  "zell am see": "S", "bischofshofen": "S",
+  "st. johann im pongau": "S", "radstadt": "S",
+  "schwarzach": "S", "tamsweg": "S",
+  // Tirol (T)
+  "innsbruck": "T", "kufstein": "T", "wörgl": "T",
+  "schwaz": "T", "kitzbühel": "T", "reutte": "T",
+  "imst": "T", "landeck": "T", "lienz": "T",
+  "telfs": "T", "hall in tirol": "T",
+  // Vorarlberg (V)
+  "bregenz": "V", "dornbirn": "V", "feldkirch": "V",
+  "bludenz": "V", "lustenau": "V", "hohenems": "V",
+  "rankweil": "V", "hard": "V",
+  // Kärnten (K)
+  "klagenfurt": "K", "villach": "K", "wolfsberg": "K",
+  "spittal": "K", "spittal an der drau": "K",
+  "feldkirchen": "K", "hermagor": "K",
+  "st. veit an der glan": "K",
+  // Steiermark (ST-AT) — use "STMK" to avoid clash with German ST
+  "graz": "STMK", "leoben": "STMK", "kapfenberg": "STMK",
+  "bruck an der mur": "STMK", "mürzzuschlag": "STMK",
+  "knittelfeld": "STMK", "judenburg": "STMK",
+  "fürstenfeld": "STMK", "feldbach": "STMK",
+  "leibnitz": "STMK", "gleisdorf": "STMK",
+  "deutschlandsberg": "STMK",
+  // Burgenland (B-AT) — use "BGLD" to avoid clash with German BE
+  "eisenstadt": "BGLD", "rust": "BGLD",
+  "neusiedl am see": "BGLD",
+  "oberwart": "BGLD", "güssing": "BGLD",
+  "jennersdorf": "BGLD", "mattersburg": "BGLD",
+
+  // ── Switzerland / Schweiz ─────────────────────────────────────────────────
+  // Zürich (ZH)
+  "zürich": "ZH", "zurich": "ZH", "winterthur": "ZH",
+  "dübendorf": "ZH", "kloten": "ZH", "uster": "ZH",
+  "bülach": "ZH", "dietikon": "ZH", "horgen": "ZH",
+  "wetzikon": "ZH", "regensdorf": "ZH",
+  // Bern (BE-CH) — use "BE-CH" to avoid clash with Berlin
+  "bern": "BE-CH", "biel": "BE-CH", "biel/bienne": "BE-CH",
+  "thun": "BE-CH", "köniz": "BE-CH",
+  "langenthal": "BE-CH", "burgdorf": "BE-CH",
+  "interlaken": "BE-CH", "belp": "BE-CH",
+  // Luzern (LU)
+  "luzern": "LU", "lucerne": "LU", "kriens": "LU",
+  "emmen": "LU", "sursee": "LU", "willisau": "LU",
+  // Schwyz (SZ)
+  "schwyz": "SZ", "küssnacht": "SZ",
+  "arth": "SZ", "einsiedeln": "SZ",
+  // Zug (ZG)
+  "zug": "ZG", "baar": "ZG", "steinhausen": "ZG",
+  // Fribourg (FR)
+  "fribourg": "FR", "bulle": "FR",
+  "murten": "FR",
+  // Solothurn (SO)
+  "solothurn": "SO", "olten": "SO", "grenchen": "SO",
+  // Basel-Stadt (BS)
+  "basel": "BS", "basle": "BS",
+  // Basel-Landschaft (BL)
+  "liestal": "BL", "arlesheim": "BL",
+  // Schaffhausen (SH-CH) — use "SH-CH" to avoid clash with German SH
+  "schaffhausen": "SH-CH",
+  // St. Gallen (SG)
+  "st. gallen": "SG", "st gallen": "SG", "saint gallen": "SG",
+  "rapperswil": "SG", "wil": "SG", "gossau": "SG",
+  "altenrhein": "SG",
+  // Graubünden (GR)
+  "chur": "GR", "davos": "GR", "samedan": "GR",
+  "arosa": "GR", "pontresina": "GR", "st. moritz": "GR",
+  // Aargau (AG)
+  "aarau": "AG", "baden": "AG", "wettingen": "AG",
+  "lenzburg": "AG", "brugg": "AG", "rheinfelden": "AG",
+  // Thurgau (TG)
+  "frauenfeld": "TG", "kreuzlingen": "TG", "amriswil": "TG",
+  // Ticino (TI)
+  "lugano": "TI", "bellinzona": "TI", "locarno": "TI",
+  "mendrisio": "TI", "chiasso": "TI",
+  // Vaud (VD)
+  "lausanne": "VD", "yverdon": "VD",
+  "yverdon-les-bains": "VD", "montreux": "VD",
+  "la chaux-de-fonds": "NE",
+  // Valais (VS)
+  "sion": "VS", "sitten": "VS", "brig": "VS",
+  "visp": "VS", "monthey": "VS", "martigny": "VS",
+  // Neuchâtel (NE)
+  "neuchâtel": "NE", "neuenburg": "NE",
+  // Genève (GE)
+  "genf": "GE", "genève": "GE", "geneva": "GE",
 };
 
 /** Words that indicate description text leaked into a city/location field */
 const JUNK_LOCATION_WORDS = [
+  // German spec/listing words
   "verkauf", "privatverkauf", "angebot", "flugzeug", "flugzeuges", "aircraft",
   "kontaktdaten", "kontakt", "email", "telefon", "tel", "mobil", "handy",
   "segelfliegergruppe", "segelfluggelände", "verein", "viehheide",
   "mittelhessen", "wartet", "biete", "suche", "hello", "offering",
   "selling", "price", "preis", "baujahr", "betriebsstunden", "motor",
   "data", "sheet", "info", "noreply", "description", "details",
+  // Spec units / measurements (leaked from listing body)
+  "stunden", "std", " ps", " kw", " hp", " kg", " km", " nm",
+  // Location qualifiers that may appear without a real city
+  "raum", "nähe", "region", "gebiet", "umgebung", "süd", "nord", "ost", "west",
+  "deutschlandweit", "bundesweit", "europaweit", "weltweit",
+  // Other noise
+  "privatperson", "privatverkäufer", "händler", "dealer", "broker",
+  "anfrage", "anfragen", "weiteres", "siehe", "more", "view",
 ];
 
 /**
@@ -870,36 +1165,48 @@ function sanitizeCity(raw: string | null): string | null {
   const trimmed = raw.trim();
 
   // Too short or too long for a city name
-  if (trimmed.length < 2 || trimmed.length > 40) return null;
+  if (trimmed.length < 2 || trimmed.length > 35) return null;
 
   // Contains multiple lines or bullet points → description bleed
   if (/[\n•]/.test(trimmed)) return null;
 
-  // Contains email-like patterns
-  if (/@|\.com|\.de|\.net/.test(trimmed)) return null;
+  // Contains email-like patterns or URLs
+  if (/@|\.com|\.de|\.net|\.org|https?:\/\//.test(trimmed)) return null;
 
-  // Contains phone numbers
-  if (/\+?\d{5,}/.test(trimmed)) return null;
+  // Contains any digit (city names never have digits; spec values do)
+  if (/\d/.test(trimmed)) return null;
+
+  // All uppercase (likely an abbreviation or ICAO code, not a city)
+  if (trimmed === trimmed.toUpperCase() && trimmed.length > 3) return null;
 
   // Check for junk words (description leaking into location)
   const lower = trimmed.toLowerCase();
   if (JUNK_LOCATION_WORDS.some((w) => lower.includes(w))) return null;
 
-  // Must start with uppercase letter (German city names always do)
+  // Must start with uppercase letter (German/European city names always do)
   if (!/^[A-ZÄÖÜ]/.test(trimmed)) return null;
 
   // If it's a known city, always accept
   if (GERMAN_CITY_TO_STATE[lower]) return trimmed;
 
-  // Max 4 words for an unknown city (e.g. "Bad Aibling am Inn")
+  // Unknown city: max 3 words (e.g. "Bad Aibling", "Frankfurt am Main")
   const wordCount = trimmed.split(/\s+/).length;
-  if (wordCount > 4) return null;
+  if (wordCount > 3) return null;
+
+  // Unknown city: each word must start with uppercase or be a short connector
+  const CONNECTORS = new Set(["am", "an", "im", "in", "bei", "de", "la", "le", "van", "von", "den"]);
+  const words = trimmed.split(/\s+/);
+  const validWords = words.every(
+    (w) => /^[A-ZÄÖÜ]/.test(w) || CONNECTORS.has(w.toLowerCase())
+  );
+  if (!validWords) return null;
 
   return trimmed;
 }
 
 /**
- * Look up the German state for a city name.
+ * Look up the state/Bundesland/canton code for a city in the DACH region.
+ * Returns the abbreviated code stored by the StateCombobox (BY, BW, RP, W, ZH, …).
  */
 function resolveGermanState(city: string | null): string | null {
   if (!city) return null;
@@ -912,7 +1219,86 @@ function isValidIsoDate(value: string | null | undefined): boolean {
 }
 
 /**
+ * Classify raw avionics text into specific DB columns.
+ * Priority: TCAS/traffic > Transponder/ADS-B > Autopilot > GPS/Nav > Radios > Other
+ */
+function classifyAvionicsText(raw: string | null): {
+  avionics_gps: string | null;
+  avionics_autopilot: string | null;
+  avionics_radios: string | null;
+  avionics_transponder: string | null;
+  avionics_tcas: string | null;
+  avionics_other: string | null;
+} {
+  const empty = { avionics_gps: null, avionics_autopilot: null, avionics_radios: null, avionics_transponder: null, avionics_tcas: null, avionics_other: null };
+  if (!raw) return empty;
+
+  const segments = raw.split(/[;]+/).map((s) => s.trim()).filter((s) => s.length > 2);
+  const gps: string[] = [], ap: string[] = [], radio: string[] = [], xpdr: string[] = [], tcas: string[] = [], other: string[] = [];
+
+  const GPS_KW   = ['GPS', 'GNSS', 'Garmin', 'Dynon', 'SkyDemon', 'SkyView', 'EFIS', 'Glass Cockpit', 'G430', 'G500', 'G600', 'GTN', 'GNS', 'Moving Map', 'MFD', 'PFD', 'Navigat', 'Navi', 'Avmap', 'Naviter'];
+  const AP_KW    = ['Autopilot', 'Autoflight', 'Autoland', 'AP '];
+  const RADIO_KW = ['Funk', 'COM ', ' COM', 'NAV ', ' NAV', 'VOR', 'ILS', 'DME', 'ADF', 'Becker', 'Trig', 'Bendix', 'King', 'Radio', 'KY-', 'KX-', 'AR ', 'SL40', 'SL30', 'KT-', 'Frequenz', 'Sprechfunk', 'UKW'];
+  const XPDR_KW  = ['Transponder', 'XPDR', 'XPNDR', 'Mode-S', 'Mode S', 'Mode-C', 'Mode C', 'ADS-B', 'ADSB', 'GTX', 'Squawk'];
+  const TCAS_KW  = ['TCAS', 'FLARM', 'PowerFLARM', 'Traffic Alert', 'PCAS', 'Kollisions', 'TAS '];
+
+  for (const seg of segments) {
+    if (TCAS_KW.some((k) => seg.includes(k)))       tcas.push(seg);
+    else if (XPDR_KW.some((k) => seg.includes(k)))  xpdr.push(seg);
+    else if (AP_KW.some((k) => seg.includes(k)))    ap.push(seg);
+    else if (GPS_KW.some((k) => seg.includes(k)))   gps.push(seg);
+    else if (RADIO_KW.some((k) => seg.includes(k))) radio.push(seg);
+    else                                              other.push(seg);
+  }
+
+  return {
+    avionics_gps:         gps.length   > 0 ? gps.join(', ')   : null,
+    avionics_autopilot:   ap.length    > 0 ? ap.join(', ')    : null,
+    avionics_radios:      radio.length > 0 ? radio.join(', ') : null,
+    avionics_transponder: xpdr.length  > 0 ? xpdr.join(', ')  : null,
+    avionics_tcas:        tcas.length  > 0 ? tcas.join(', ')  : null,
+    avionics_other:       other.length > 0 ? other.join(', ') : null,
+  };
+}
+
+/** Cache of aircraft_features for keyword matching */
+let featuresCache: Array<{ id: number; name: string }> | null = null;
+
+async function loadFeaturesCache(): Promise<Array<{ id: number; name: string }>> {
+  if (featuresCache) return featuresCache;
+  const { data } = await supabase.from("aircraft_features").select("id, name");
+  featuresCache = (data ?? []).filter((f: any) => f.id && f.name) as Array<{ id: number; name: string }>;
+  return featuresCache;
+}
+
+/**
+ * Detect aircraft feature IDs by matching listing text against known aircraft_features names.
+ * Only matches meaningful keywords (4+ chars) to avoid false positives.
+ */
+async function detectFeatureIds(text: string): Promise<number[]> {
+  const features = await loadFeaturesCache();
+  const textLower = text.toLowerCase();
+  const matched: number[] = [];
+
+  for (const feature of features) {
+    const nameLower = feature.name.toLowerCase();
+    // Split feature name into key terms, skip short stop-words
+    const keyTerms = nameLower
+      .split(/[\s/,\-()]+/)
+      .filter((t) => t.length >= 4)
+      .filter((t) => !['with', 'and', 'the', 'for', 'system'].includes(t));
+
+    if (keyTerms.length > 0 && keyTerms.some((term) => textLower.includes(term))) {
+      matched.push(feature.id);
+    }
+  }
+
+  return matched;
+}
+
+/**
  * Log a draft listing to admin_activity_logs for review.
+ * Admin dashboard shows these under the Activity tab.
  * Admin dashboard shows these under the Activity tab.
  */
 async function logDraftForReview(title: string, sourceId: string, guessedManufacturer: string): Promise<void> {
