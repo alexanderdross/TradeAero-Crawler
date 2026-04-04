@@ -14,8 +14,10 @@ import type { ParsedPartsListing } from "../types.js";
 const CATEGORY_MAP: Record<string, number> = {
   avionics: 1,
   engines: 2,
-  rescue: 3,
-  miscellaneous: 4,
+  propellers: 3,
+  instruments: 6,
+  rescue: 5,
+  miscellaneous: 5,
 };
 
 /**
@@ -51,10 +53,11 @@ export async function upsertPartsListing(
 
     const record = mapToPartsRow(listing, systemUserId, freshImages, null);
 
-    // Strip locale fields to preserve existing translations
+    // Strip locale fields and slug to preserve existing translations and trigger-generated slugs
     const updateFields: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
       if (/^(headline|description|slug|remaining_life)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
+      if (key === "slug") continue; // Preserve trigger-generated slug (headline-{listing_number})
       if (key === "images" && freshImages.length === 0) continue;
       updateFields[key] = value;
     }
