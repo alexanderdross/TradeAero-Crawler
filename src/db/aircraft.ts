@@ -830,62 +830,311 @@ function extractPhoneFromText(text: string): string | null {
 }
 
 /**
- * German city → ISO 3166-2 state code mapping for common aviation locations.
- * Uses the abbreviated state code (BY, BW, RP, ...) to match what user-submitted
- * listings store via the StateCombobox (codes from the `states` DB table).
+ * City → state/canton/Bundesland code mapping for DACH region (Germany, Austria, Switzerland).
+ * Uses abbreviated codes matching what the StateCombobox stores from the `states` DB table.
+ *
+ * Germany: BY BW HE NW NI SH RP SN BB TH ST MV SL BE HH HB
+ * Austria: W NÖ OÖ S T V K ST B  (Bundesland codes)
+ * Switzerland: ZH BE LU SZ ZG FR SO BS BL SH SG GR AG TG TI VD VS NE GE JU (canton codes)
  */
 const GERMAN_CITY_TO_STATE: Record<string, string> = {
-  // Bavaria (BY)
-  "münchen": "BY", "munich": "BY", "augsburg": "BY", "nürnberg": "BY",
+  // ── Bavaria / Bayern (BY) ─────────────────────────────────────────────────
+  "münchen": "BY", "munich": "BY", "augsburg": "BY", "nürnberg": "BY", "nuremberg": "BY",
   "regensburg": "BY", "würzburg": "BY", "ingolstadt": "BY", "straubing": "BY",
   "landshut": "BY", "rosenheim": "BY", "kempten": "BY", "memmingen": "BY",
   "bayreuth": "BY", "bamberg": "BY", "passau": "BY", "erding": "BY",
   "fürstenfeldbruck": "BY", "jesenwang": "BY", "oberschleißheim": "BY",
-  "landsberg": "BY", "kaufbeuren": "BY", "weilheim": "BY", "garmisch": "BY",
+  "landsberg": "BY", "landsberg am lech": "BY", "kaufbeuren": "BY",
+  "weilheim": "BY", "weilheim in oberbayern": "BY",
+  "garmisch": "BY", "garmisch-partenkirchen": "BY",
   "traunstein": "BY", "altötting": "BY", "deggendorf": "BY",
-  // Baden-Württemberg (BW)
-  "stuttgart": "BW", "karlsruhe": "BW", "freiburg": "BW",
+  "schwabach": "BY", "ansbach": "BY", "fürth": "BY",
+  "erlangen": "BY", "hof": "BY", "schweinfurt": "BY", "coburg": "BY",
+  "amberg": "BY", "weiden": "BY", "neumarkt": "BY", "neumarkt in der oberpfalz": "BY",
+  "dachau": "BY", "freising": "BY", "ebersberg": "BY", "starnberg": "BY",
+  "germering": "BY", "puchheim": "BY", "gauting": "BY", "olching": "BY",
+  "gröbenzell": "BY", "maisach": "BY", "neufahrn": "BY", "moosburg": "BY",
+  "vilsbiburg": "BY", "dingolfing": "BY", "landau an der isar": "BY",
+  "plattling": "BY", "regen": "BY", "grafenau": "BY", "freyung": "BY",
+  "pfarrkirchen": "BY", "eggenfelden": "BY", "mühldorf": "BY",
+  "waldkraiburg": "BY", "wasserburg": "BY", "prien": "BY",
+  "aschau": "BY", "traunreut": "BY", "freilassing": "BY",
+  "bad reichenhall": "BY", "berchtesgaden": "BY",
+  "bad aibling": "BY", "bad tölz": "BY", "miesbach": "BY",
+  "wolfratshausen": "BY", "holzkirchen": "BY", "herrsching": "BY",
+  "neuburg": "BY", "neuburg an der donau": "BY",
+  "günzburg": "BY", "illertissen": "BY", "lauingen": "BY",
+  "dillingen": "BY", "dillingen an der donau": "BY",
+  "nördlingen": "BY", "donauwörth": "BY", "aichach": "BY",
+  "schrobenhausen": "BY", "pfaffenhofen": "BY",
+  "füssen": "BY", "immenstadt": "BY", "lindau": "BY",
+  "sonthofen": "BY", "oberstdorf": "BY",
+  "marktoberdorf": "BY", "buchloe": "BY", "türkheim": "BY",
+  "bad wörishofen": "BY", "mindelheim": "BY",
+  "neu-ulm": "BY", "senden": "BY",
+  "haar": "BY", "vaterstetten": "BY", "markt schwaben": "BY",
+  "poing": "BY", "grafing": "BY", "aßling": "BY",
+  // ── Baden-Württemberg (BW) ────────────────────────────────────────────────
+  "stuttgart": "BW", "karlsruhe": "BW", "freiburg": "BW", "freiburg im breisgau": "BW",
   "mannheim": "BW", "heidelberg": "BW", "ulm": "BW",
   "friedrichshafen": "BW", "donaueschingen": "BW", "konstanz": "BW",
   "heilbronn": "BW", "pforzheim": "BW", "reutlingen": "BW",
   "leutkirch": "BW", "biberach": "BW", "ravensburg": "BW",
-  // Hesse (HE)
-  "frankfurt": "HE", "wiesbaden": "HE", "kassel": "HE", "darmstadt": "HE",
+  "tübingen": "BW", "aalen": "BW", "esslingen": "BW",
+  "göppingen": "BW", "heidenheim": "BW", "ludwigsburg": "BW",
+  "offenburg": "BW", "rottweil": "BW", "schwäbisch gmünd": "BW",
+  "schwäbisch hall": "BW", "sigmaringen": "BW", "tuttlingen": "BW",
+  "villingen-schwenningen": "BW", "waiblingen": "BW",
+  "freudenstadt": "BW", "balingen": "BW", "calw": "BW",
+  "sindelfingen": "BW", "böblingen": "BW", "leonberg": "BW",
+  "fellbach": "BW", "schorndorf": "BW", "backnang": "BW",
+  "crailsheim": "BW", "ellwangen": "BW",
+  "überlingen": "BW", "radolfzell": "BW", "singen": "BW",
+  "wangen": "BW", "wangen im allgäu": "BW",
+  "bad saulgau": "BW", "bad waldsee": "BW",
+  "kehl": "BW", "lahr": "BW", "achern": "BW",
+  "bruchsal": "BW", "rastatt": "BW", "ettlingen": "BW",
+  "mosbach": "BW", "sinsheim": "BW", "eberbach": "BW",
+  "bad mergentheim": "BW", "künzelsau": "BW",
+  "nürtingen": "BW", "kirchheim": "BW", "kirchheim unter teck": "BW",
+  "metzingen": "BW", "bad urach": "BW",
+  "albstadt": "BW", "haigerloch": "BW",
+  "meersburg": "BW", "markdorf": "BW",
+  // ── Hesse / Hessen (HE) ──────────────────────────────────────────────────
+  "frankfurt": "HE", "frankfurt am main": "HE",
+  "wiesbaden": "HE", "kassel": "HE", "darmstadt": "HE",
   "gießen": "HE", "marburg": "HE", "fulda": "HE", "egelsbach": "HE",
-  "offenbach": "HE", "hanau": "HE", "bad homburg": "HE",
-  // North Rhine-Westphalia (NW)
-  "köln": "NW", "düsseldorf": "NW", "dortmund": "NW",
+  "offenbach": "HE", "offenbach am main": "HE",
+  "hanau": "HE", "bad homburg": "HE",
+  "rüsselsheim": "HE", "bad hersfeld": "HE",
+  "bensheim": "HE", "büdingen": "HE",
+  "groß-gerau": "HE", "limburg": "HE", "langen": "HE",
+  "wetzlar": "HE", "friedberg": "HE",
+  "butzbach": "HE", "bad nauheim": "HE",
+  "korbach": "HE", "frankenberg": "HE",
+  "eschwege": "HE", "witzenhausen": "HE",
+  "hersfeld": "HE",
+  // ── North Rhine-Westphalia / Nordrhein-Westfalen (NW) ────────────────────
+  "köln": "NW", "cologne": "NW",
+  "düsseldorf": "NW", "dortmund": "NW",
   "essen": "NW", "bonn": "NW", "münster": "NW",
   "aachen": "NW", "bielefeld": "NW", "wuppertal": "NW",
   "bochum": "NW", "duisburg": "NW", "paderborn": "NW",
-  // Lower Saxony (NI)
-  "hannover": "NI", "braunschweig": "NI", "osnabrück": "NI",
-  "oldenburg": "NI", "wolfsburg": "NI", "hildesheim": "NI",
-  "göttingen": "NI", "celle": "NI", "wilhelmshaven": "NI",
-  // Schleswig-Holstein (SH)
+  "gelsenkirchen": "NW", "hagen": "NW", "hamm": "NW",
+  "herne": "NW", "krefeld": "NW", "leverkusen": "NW",
+  "mönchengladbach": "NW", "mülheim": "NW", "mülheim an der ruhr": "NW",
+  "oberhausen": "NW", "remscheid": "NW", "solingen": "NW",
+  "bottrop": "NW", "recklinghausen": "NW", "lünen": "NW",
+  "siegen": "NW", "neuss": "NW", "moers": "NW",
+  "gütersloh": "NW", "herford": "NW", "iserlohn": "NW",
+  "witten": "NW", "schwelm": "NW", "velbert": "NW",
+  "kleve": "NW", "wesel": "NW", "dinslaken": "NW",
+  "düren": "NW", "jülich": "NW", "bergheim": "NW",
+  "euskirchen": "NW", "bad godesberg": "NW",
+  "minden": "NW", "detmold": "NW", "lemgo": "NW",
+  "lippstadt": "NW", "soest": "NW", "arnsberg": "NW",
+  "meschede": "NW", "olpe": "NW", "attendorn": "NW",
+  // ── Lower Saxony / Niedersachsen (NI) ────────────────────────────────────
+  "hannover": "NI", "hanover": "NI",
+  "braunschweig": "NI", "brunswick": "NI",
+  "osnabrück": "NI", "oldenburg": "NI", "wolfsburg": "NI",
+  "hildesheim": "NI", "göttingen": "NI", "celle": "NI",
+  "wilhelmshaven": "NI", "delmenhorst": "NI", "emden": "NI",
+  "salzgitter": "NI", "hameln": "NI", "lüneburg": "NI",
+  "wolfenbüttel": "NI", "goslar": "NI",
+  "northeim": "NI", "einbeck": "NI",
+  "cuxhaven": "NI", "bremerhaven": "HB",
+  "stade": "NI", "buxtehude": "NI",
+  "uelzen": "NI", "lüchow": "NI",
+  "nienburg": "NI", "schaumburg": "NI",
+  "lingen": "NI", "nordhorn": "NI", "meppen": "NI",
+  "cloppenburg": "NI", "vechta": "NI",
+  "peine": "NI", "seesen": "NI",
+  "bad harzburg": "NI", "clausthal-zellerfeld": "NI",
+  // ── Schleswig-Holstein (SH) ───────────────────────────────────────────────
   "kiel": "SH", "lübeck": "SH", "flensburg": "SH",
   "neumünster": "SH", "husum": "SH", "heide": "SH",
-  // Rhineland-Palatinate (RP)
+  "norderstedt": "SH", "pinneberg": "SH",
+  "rendsburg": "SH", "schleswig": "SH", "itzehoe": "SH",
+  "ahrensburg": "SH", "reinbek": "SH",
+  "elmshorn": "SH",
+  "bad segeberg": "SH", "bad oldesloe": "SH",
+  "eutin": "SH", "plön": "SH",
+  "sylt": "SH", "föhr": "SH",
+  // ── Rhineland-Palatinate / Rheinland-Pfalz (RP) ──────────────────────────
   "mainz": "RP", "koblenz": "RP", "trier": "RP", "speyer": "RP",
-  "kaiserslautern": "RP", "ludwigshafen": "RP", "neustadt": "RP",
-  // Saxony (SN)
+  "kaiserslautern": "RP", "ludwigshafen": "RP",
+  "neustadt an der weinstraße": "RP", "neustadt": "RP",
+  "pirmasens": "RP", "worms": "RP", "zweibrücken": "RP",
+  "bad kreuznach": "RP", "andernach": "RP", "bingen": "RP",
+  "bingen am rhein": "RP",
+  "idar-oberstein": "RP", "landau": "RP", "landau in der pfalz": "RP",
+  "mayen": "RP", "neuwied": "RP", "sinzig": "RP",
+  "frankenthal": "RP", "ingelheim": "RP",
+  "alzey": "RP", "oppenheim": "RP",
+  "cochem": "RP", "zell": "RP",
+  "bitburg": "RP", "prüm": "RP",
+  "bernkastel": "RP", "bernkastel-kues": "RP",
+  // ── Saxony / Sachsen (SN) ─────────────────────────────────────────────────
   "dresden": "SN", "leipzig": "SN", "chemnitz": "SN",
   "zwickau": "SN", "plauen": "SN",
-  // Brandenburg (BB)
+  "görlitz": "SN", "bautzen": "SN", "freiberg": "SN",
+  "grimma": "SN", "meißen": "SN", "riesa": "SN",
+  "hoyerswerda": "SN", "kamenz": "SN",
+  "delitzsch": "SN", "oschatz": "SN", "döbeln": "SN",
+  "annaberg": "SN", "annaberg-buchholz": "SN",
+  "aue": "SN", "stollberg": "SN",
+  // ── Brandenburg (BB) ─────────────────────────────────────────────────────
   "potsdam": "BB", "strausberg": "BB", "cottbus": "BB",
   "frankfurt an der oder": "BB", "eberswalde": "BB",
-  // Thuringia (TH)
+  "neuruppin": "BB", "oranienburg": "BB",
+  "schwedt": "BB", "senftenberg": "BB",
+  "brandenburg": "BB", "brandenburg an der havel": "BB",
+  "rathenow": "BB", "pritzwalk": "BB",
+  "fürstenwalde": "BB", "eisenhüttenstadt": "BB",
+  "königs wusterhausen": "BB", "zossen": "BB",
+  "luckenwalde": "BB", "jüterbog": "BB",
+  // ── Thuringia / Thüringen (TH) ────────────────────────────────────────────
   "erfurt": "TH", "jena": "TH", "weimar": "TH",
   "gera": "TH", "gotha": "TH", "eisenach": "TH",
-  // Saxony-Anhalt (ST)
+  "suhl": "TH", "altenburg": "TH", "nordhausen": "TH",
+  "apolda": "TH", "bad langensalza": "TH",
+  "ilmenau": "TH", "meiningen": "TH",
+  "mühlhausen": "TH", "sondershausen": "TH",
+  "rudolstadt": "TH", "saalfeld": "TH",
+  "sonneberg": "TH", "hildburghausen": "TH",
+  // ── Saxony-Anhalt / Sachsen-Anhalt (ST) ──────────────────────────────────
   "magdeburg": "ST", "halle": "ST", "dessau": "ST",
-  // Mecklenburg-Vorpommern (MV)
+  "dessau-roßlau": "ST", "wittenberg": "ST",
+  "bitterfeld": "ST", "merseburg": "ST",
+  "quedlinburg": "ST", "stendal": "ST",
+  "zeitz": "ST", "aschersleben": "ST",
+  "bernburg": "ST", "halberstadt": "ST",
+  "schönebeck": "ST", "wernigerode": "ST",
+  "sangerhausen": "ST", "weißenfels": "ST",
+  // ── Mecklenburg-Vorpommern (MV) ───────────────────────────────────────────
   "rostock": "MV", "schwerin": "MV", "greifswald": "MV",
   "stralsund": "MV", "neubrandenburg": "MV",
-  // Saarland (SL)
-  "saarbrücken": "SL", "saarlouis": "SL", "homburg": "SL",
-  // City-states
+  "wismar": "MV", "güstrow": "MV", "waren": "MV",
+  "bergen": "MV", "ribnitz": "MV", "ribnitz-damgarten": "MV",
+  "heringsdorf": "MV", "usedom": "MV",
+  "ueckermünde": "MV", "demmin": "MV",
+  "anklam": "MV", "wolgast": "MV",
+  // ── Saarland (SL) ─────────────────────────────────────────────────────────
+  "saarbrücken": "SL", "saarlouis": "SL",
+  "homburg": "SL", "neunkirchen": "SL",
+  "merzig": "SL", "st. ingbert": "SL", "völklingen": "SL",
+  // ── City-states (BE / HH / HB) ────────────────────────────────────────────
   "berlin": "BE", "hamburg": "HH", "bremen": "HB",
+
+  // ── Austria / Österreich ──────────────────────────────────────────────────
+  // Wien (W)
+  "wien": "W", "vienna": "W",
+  // Niederösterreich (NÖ)
+  "st. pölten": "NÖ", "st pölten": "NÖ", "wiener neustadt": "NÖ",
+  "klosterneuburg": "NÖ", "korneuburg": "NÖ", "stockerau": "NÖ",
+  "tulln": "NÖ", "krems": "NÖ", "krems an der donau": "NÖ",
+  "mistelbach": "NÖ", "mödling": "NÖ", "baden bei wien": "NÖ",
+  "amstetten": "NÖ", "waidhofen": "NÖ",
+  "gmünd": "NÖ", "zwettl": "NÖ",
+  "schwechat": "NÖ", "fischamend": "NÖ",
+  // Oberösterreich (OÖ)
+  "linz": "OÖ", "wels": "OÖ", "steyr": "OÖ",
+  "leonding": "OÖ", "traun": "OÖ", "ansfelden": "OÖ",
+  "ried im innkreis": "OÖ", "vöcklabruck": "OÖ",
+  "gmunden": "OÖ", "bad ischl": "OÖ",
+  "braunau": "OÖ", "braunau am inn": "OÖ",
+  "freistadt": "OÖ", "rohrbach": "OÖ",
+  "kirchdorf": "OÖ", "schärding": "OÖ",
+  "perg": "OÖ", "grieskirchen": "OÖ",
+  // Salzburg (S)
+  "salzburg": "S", "hallein": "S",
+  "zell am see": "S", "bischofshofen": "S",
+  "st. johann im pongau": "S", "radstadt": "S",
+  "schwarzach": "S", "tamsweg": "S",
+  // Tirol (T)
+  "innsbruck": "T", "kufstein": "T", "wörgl": "T",
+  "schwaz": "T", "kitzbühel": "T", "reutte": "T",
+  "imst": "T", "landeck": "T", "lienz": "T",
+  "telfs": "T", "hall in tirol": "T",
+  // Vorarlberg (V)
+  "bregenz": "V", "dornbirn": "V", "feldkirch": "V",
+  "bludenz": "V", "lustenau": "V", "hohenems": "V",
+  "rankweil": "V", "hard": "V",
+  // Kärnten (K)
+  "klagenfurt": "K", "villach": "K", "wolfsberg": "K",
+  "spittal": "K", "spittal an der drau": "K",
+  "feldkirchen": "K", "hermagor": "K",
+  "st. veit an der glan": "K",
+  // Steiermark (ST-AT) — use "STMK" to avoid clash with German ST
+  "graz": "STMK", "leoben": "STMK", "kapfenberg": "STMK",
+  "bruck an der mur": "STMK", "mürzzuschlag": "STMK",
+  "knittelfeld": "STMK", "judenburg": "STMK",
+  "fürstenfeld": "STMK", "feldbach": "STMK",
+  "leibnitz": "STMK", "gleisdorf": "STMK",
+  "deutschlandsberg": "STMK",
+  // Burgenland (B-AT) — use "BGLD" to avoid clash with German BE
+  "eisenstadt": "BGLD", "rust": "BGLD",
+  "neusiedl am see": "BGLD",
+  "oberwart": "BGLD", "güssing": "BGLD",
+  "jennersdorf": "BGLD", "mattersburg": "BGLD",
+
+  // ── Switzerland / Schweiz ─────────────────────────────────────────────────
+  // Zürich (ZH)
+  "zürich": "ZH", "zurich": "ZH", "winterthur": "ZH",
+  "dübendorf": "ZH", "kloten": "ZH", "uster": "ZH",
+  "bülach": "ZH", "dietikon": "ZH", "horgen": "ZH",
+  "wetzikon": "ZH", "regensdorf": "ZH",
+  // Bern (BE-CH) — use "BE-CH" to avoid clash with Berlin
+  "bern": "BE-CH", "biel": "BE-CH", "biel/bienne": "BE-CH",
+  "thun": "BE-CH", "köniz": "BE-CH",
+  "langenthal": "BE-CH", "burgdorf": "BE-CH",
+  "interlaken": "BE-CH", "belp": "BE-CH",
+  // Luzern (LU)
+  "luzern": "LU", "lucerne": "LU", "kriens": "LU",
+  "emmen": "LU", "sursee": "LU", "willisau": "LU",
+  // Schwyz (SZ)
+  "schwyz": "SZ", "küssnacht": "SZ",
+  "arth": "SZ", "einsiedeln": "SZ",
+  // Zug (ZG)
+  "zug": "ZG", "baar": "ZG", "steinhausen": "ZG",
+  // Fribourg (FR)
+  "fribourg": "FR", "bulle": "FR",
+  "murten": "FR",
+  // Solothurn (SO)
+  "solothurn": "SO", "olten": "SO", "grenchen": "SO",
+  // Basel-Stadt (BS)
+  "basel": "BS", "basle": "BS",
+  // Basel-Landschaft (BL)
+  "liestal": "BL", "arlesheim": "BL",
+  // Schaffhausen (SH-CH) — use "SH-CH" to avoid clash with German SH
+  "schaffhausen": "SH-CH",
+  // St. Gallen (SG)
+  "st. gallen": "SG", "st gallen": "SG", "saint gallen": "SG",
+  "rapperswil": "SG", "wil": "SG", "gossau": "SG",
+  "altenrhein": "SG",
+  // Graubünden (GR)
+  "chur": "GR", "davos": "GR", "samedan": "GR",
+  "arosa": "GR", "pontresina": "GR", "st. moritz": "GR",
+  // Aargau (AG)
+  "aarau": "AG", "baden": "AG", "wettingen": "AG",
+  "lenzburg": "AG", "brugg": "AG", "rheinfelden": "AG",
+  // Thurgau (TG)
+  "frauenfeld": "TG", "kreuzlingen": "TG", "amriswil": "TG",
+  // Ticino (TI)
+  "lugano": "TI", "bellinzona": "TI", "locarno": "TI",
+  "mendrisio": "TI", "chiasso": "TI",
+  // Vaud (VD)
+  "lausanne": "VD", "yverdon": "VD",
+  "yverdon-les-bains": "VD", "montreux": "VD",
+  "la chaux-de-fonds": "NE",
+  // Valais (VS)
+  "sion": "VS", "sitten": "VS", "brig": "VS",
+  "visp": "VS", "monthey": "VS", "martigny": "VS",
+  // Neuchâtel (NE)
+  "neuchâtel": "NE", "neuenburg": "NE",
+  // Genève (GE)
+  "genf": "GE", "genève": "GE", "geneva": "GE",
 };
 
 /** Words that indicate description text leaked into a city/location field */
@@ -956,7 +1205,8 @@ function sanitizeCity(raw: string | null): string | null {
 }
 
 /**
- * Look up the German state for a city name.
+ * Look up the state/Bundesland/canton code for a city in the DACH region.
+ * Returns the abbreviated code stored by the StateCombobox (BY, BW, RP, W, ZH, …).
  */
 function resolveGermanState(city: string | null): string | null {
   if (!city) return null;
