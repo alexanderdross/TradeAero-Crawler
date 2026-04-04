@@ -136,6 +136,11 @@ export function parseAeromarktAircraftPage(
         contactEmail: null,
         contactPhone: null,
         imageUrls: images,
+        registration: null,
+        serialNumber: null,
+        airworthy: null,
+        avionicsText: null,
+        country: null,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -305,6 +310,50 @@ export function parseAeromarktAircraftDetail(
   const engineDescMatch = text.match(/(?:Triebwerk|Motortyp|Motor)[:\s]*([^;\n,.]{5,60})/i);
   if (engineDescMatch) engine = engineDescMatch[1].trim();
 
+  // Registration / Kennzeichen
+  let registration = existing.registration;
+  const regAeroMatch = text.match(/(?:Kennzeichen|Kennz\.?)[:\s]*([A-Z]{1,2}-[A-Z0-9]{2,5})/i)
+    ?? text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
+  if (regAeroMatch) registration = regAeroMatch[1];
+
+  // Serial number / Werk-Nr.
+  let serialNumber = existing.serialNumber;
+  const serialAeroMatch = text.match(/(?:Werk[- ]?Nr\.?|S\/N|Seriennummer)[:\s]*([A-Z0-9][\w-]{1,20})/i);
+  if (serialAeroMatch) serialNumber = serialAeroMatch[1].trim();
+
+  // Airworthy
+  let airworthy = existing.airworthy;
+  if (/nicht\s*(?:luft|verkehrs)tüchtig/i.test(text)) airworthy = false;
+  else if (/(?:luft|verkehrs)tüchtig(?!\s*zeugnis)|LTB\s+vorhanden|airworthy/i.test(text)) airworthy = true;
+
+  // Avionics free text
+  let avionicsText = existing.avionicsText;
+  const AVIONICS_KW = ['GPS', 'Transponder', 'Funk', 'VOR', 'ILS', 'ADS-B', 'FLARM',
+    'Autopilot', 'Garmin', 'Dynon', 'Becker', 'Trig', 'Bendix', 'King',
+    'SkyDemon', 'SkyView', 'XPNDR', 'Mode-S', 'Mode-C', 'TCAS'];
+  const avAeroLines: string[] = [];
+  for (const seg of text.split(/[•\n]/)) {
+    const s = seg.trim();
+    if (s.length > 2 && s.length < 200 && AVIONICS_KW.some(k => s.includes(k))) {
+      avAeroLines.push(s);
+    }
+  }
+  if (avAeroLines.length > 0) avionicsText = avAeroLines.join('; ');
+
+  // Country from ICAO prefix
+  let country = existing.country;
+  const icaoCountryMatch = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2}|EG[A-Z]{2}|LF[A-Z]{2}|EB[A-Z]{2}|LP[A-Z]{2}|LE[A-Z]{2}|LK[A-Z]{2}|EP[A-Z]{2}|EH[A-Z]{2})\b/);
+  if (icaoCountryMatch) {
+    const prefix = icaoCountryMatch[1].substring(0, 2);
+    const ICAO_TO_COUNTRY: Record<string, string> = {
+      ED: 'Germany', LO: 'Austria', LS: 'Switzerland',
+      EG: 'United Kingdom', LF: 'France', EB: 'Belgium',
+      LP: 'Portugal', LE: 'Spain', LK: 'Czech Republic',
+      EP: 'Poland', EH: 'Netherlands',
+    };
+    country = ICAO_TO_COUNTRY[prefix] ?? null;
+  }
+
   // Location
   let location = existing.location;
   const locMatch = text.match(/(?:Standort|Heimatflugplatz)[:\s]*([^\n;,]{3,60})/i);
@@ -329,6 +378,11 @@ export function parseAeromarktAircraftDetail(
     annualInspection: annualInspection ?? existing.annualInspection,
     engine: engine ?? existing.engine,
     location: location ?? existing.location,
+    registration: registration ?? existing.registration,
+    serialNumber: serialNumber ?? existing.serialNumber,
+    airworthy: airworthy ?? existing.airworthy,
+    avionicsText: avionicsText ?? existing.avionicsText,
+    country: country ?? existing.country,
     imageUrls: detailImages.length > existing.imageUrls.length ? detailImages : existing.imageUrls,
   };
 }

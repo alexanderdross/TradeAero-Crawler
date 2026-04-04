@@ -47,6 +47,16 @@ export interface ParsedAircraftListing {
   airfieldName: string | null;
   /** ICAO airport code (e.g., EDAZ) */
   icaoCode: string | null;
+  /** Aircraft registration mark (e.g., D-MSEW, HB-YGX) */
+  registration: string | null;
+  /** Serial / Werk-Nr. */
+  serialNumber: string | null;
+  /** Whether the aircraft is airworthy (from explicit text mention) */
+  airworthy: boolean | null;
+  /** Free-text avionics description (GPS, radios, transponder, etc.) */
+  avionicsText: string | null;
+  /** Country of the aircraft (null = assume Germany) */
+  country: string | null;
   /** Contact name */
   contactName: string | null;
   /** Contact email (deobfuscated) */
