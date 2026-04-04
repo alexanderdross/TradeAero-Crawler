@@ -699,7 +699,10 @@ async function mapToAircraftRow(
     airworthy: listing.airworthy !== null ? (listing.airworthy ? "yes" : "no") : null,
 
     // Avionics — classified into specific columns; reference_specs fills remaining nulls
-    ...classifyAvionicsText(listing.avionicsText ?? null),
+    // has_glass_cockpit scans both avionics text and description for broader keyword coverage
+    ...classifyAvionicsText(
+      [listing.avionicsText, listing.description].filter(Boolean).join('; ') || null
+    ),
 
     // Equipment features — detected from listing text via aircraft_features DB lookup
     feature_ids: featureIds.length > 0 ? featureIds : null,
@@ -1222,6 +1225,15 @@ function isValidIsoDate(value: string | null | undefined): boolean {
  * Classify raw avionics text into specific DB columns.
  * Priority: TCAS/traffic > Transponder/ADS-B > Autopilot > GPS/Nav > Radios > Other
  */
+/** Keywords that indicate a glass cockpit / EFIS avionics suite */
+const GLASS_COCKPIT_KW = [
+  'EFIS', 'Glass Cockpit', 'Glascockpit', 'G1000', 'G2000', 'G3000', 'G5000',
+  'G430W', 'G530W', 'G430', 'G530', 'G500', 'G600', 'G700', 'GTN 650', 'GTN 750',
+  'GTN650', 'GTN750', 'GNS 430', 'GNS 530', 'GNS430', 'GNS530',
+  'Avidyne', 'Aspen', 'Dynon', 'SkyView', 'Cirrus Perspective',
+  'Garmin G', 'MFD', 'PFD', 'EICAS', 'Electronic Flight',
+];
+
 function classifyAvionicsText(raw: string | null): {
   avionics_gps: string | null;
   avionics_autopilot: string | null;
@@ -1229,8 +1241,9 @@ function classifyAvionicsText(raw: string | null): {
   avionics_transponder: string | null;
   avionics_tcas: string | null;
   avionics_other: string | null;
+  has_glass_cockpit: boolean;
 } {
-  const empty = { avionics_gps: null, avionics_autopilot: null, avionics_radios: null, avionics_transponder: null, avionics_tcas: null, avionics_other: null };
+  const empty = { avionics_gps: null, avionics_autopilot: null, avionics_radios: null, avionics_transponder: null, avionics_tcas: null, avionics_other: null, has_glass_cockpit: false };
   if (!raw) return empty;
 
   const segments = raw.split(/[;]+/).map((s) => s.trim()).filter((s) => s.length > 2);
@@ -1251,6 +1264,9 @@ function classifyAvionicsText(raw: string | null): {
     else                                              other.push(seg);
   }
 
+  // Detect glass cockpit from the full raw string (not just segments)
+  const has_glass_cockpit = GLASS_COCKPIT_KW.some((kw) => raw.includes(kw));
+
   return {
     avionics_gps:         gps.length   > 0 ? gps.join(', ')   : null,
     avionics_autopilot:   ap.length    > 0 ? ap.join(', ')    : null,
@@ -1258,6 +1274,7 @@ function classifyAvionicsText(raw: string | null): {
     avionics_transponder: xpdr.length  > 0 ? xpdr.join(', ')  : null,
     avionics_tcas:        tcas.length  > 0 ? tcas.join(', ')  : null,
     avionics_other:       other.length > 0 ? other.join(', ') : null,
+    has_glass_cockpit,
   };
 }
 
