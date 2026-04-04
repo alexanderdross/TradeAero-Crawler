@@ -3,7 +3,7 @@ import { upsertAircraftListing } from "../db/aircraft.js";
 import { upsertPartsListing } from "../db/parts.js";
 import { startCrawlRun, completeCrawlRun, failCrawlRun } from "../db/crawler-runs.js";
 import { getSystemUserId } from "../db/system-user.js";
-import { parseAeromarktAircraftPage, parseAeromarktPartsPage } from "../parsers/aeromarkt.js";
+import { parseAeromarktAircraftPage, parseAeromarktPartsPage, parseAeromarktAircraftDetail } from "../parsers/aeromarkt.js";
 import type { CrawlResult } from "../types.js";
 import { delay, fetchPage, getProxyBytesTransferred, resetProxyBytesTransferred } from "../utils/fetch.js";
 import { getTranslationTokenUsage, resetTranslationTokenUsage } from "../utils/translate.js";
@@ -62,7 +62,19 @@ async function crawlAeromarktAircraft(): Promise<CrawlResult> {
           listingsFound += listings.length;
 
           for (const listing of listings) {
-            const result = await upsertAircraftListing(listing, systemUserId);
+            // Fetch detail page to get TTAF, engine hours, cycles, annual inspection
+            let enriched = listing;
+            if (listing.sourceUrl && listing.sourceUrl !== currentUrl) {
+              try {
+                const detailHtml = await fetchPage(listing.sourceUrl, { proxy: src.useProxy });
+                enriched = parseAeromarktAircraftDetail(detailHtml, listing.sourceUrl, listing);
+                await delay();
+              } catch (detailErr) {
+                const msg = detailErr instanceof Error ? detailErr.message : String(detailErr);
+                logger.warn("Failed to fetch aeromarkt detail page", { url: listing.sourceUrl, error: msg });
+              }
+            }
+            const result = await upsertAircraftListing(enriched, systemUserId);
             switch (result) {
               case "inserted": listingsInserted++; break;
               case "updated": listingsUpdated++; break;

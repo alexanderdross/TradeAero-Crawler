@@ -21,8 +21,12 @@ export interface ParsedAircraftListing {
   year: number | null;
   /** Engine description (e.g., "Rotax 912ULS 100 PS") */
   engine: string | null;
-  /** Total flight hours */
+  /** Total airframe flight hours (TTAF) */
   totalTime: number | null;
+  /** Engine hours (TTSN / Motorstunden) */
+  engineHours: number | null;
+  /** Number of landings / cycles */
+  cycles: number | null;
   /** Maximum takeoff weight in kg */
   mtow: number | null;
   /** Rescue system description */
