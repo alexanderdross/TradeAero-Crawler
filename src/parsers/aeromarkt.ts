@@ -110,6 +110,19 @@ export function parseAeromarktAircraftPage(
       const locationCardMatch = cardText.match(/(?:Standort|Ort)[:\s]*([A-Za-zÄÖÜäöüß\s\-,]+)/i);
       const location = locationCardMatch ? locationCardMatch[1].trim().split(/[\n,]/)[0].trim() : null;
 
+      // Extract city and ICAO from location string: "München (EDDM)", "Strausberg/EDAY"
+      let cityCard: string | null = null;
+      let icaoCard: string | null = null;
+      if (location) {
+        const icaoParenMatch = location.match(/\(([A-Z]{4})\)/);
+        if (icaoParenMatch) {
+          icaoCard = icaoParenMatch[1];
+          cityCard = location.replace(/\s*\([A-Z]{4}\)/, "").trim().split(/[/,]/)[0].trim() || null;
+        } else {
+          cityCard = location.split(/[/(,]/)[0].trim() || null;
+        }
+      }
+
       listings.push({
         sourceId: detailUrl,
         sourceUrl: detailUrl,
@@ -129,9 +142,9 @@ export function parseAeromarktAircraftPage(
         price,
         priceNegotiable,
         location,
-        city: null,
+        city: cityCard,
         airfieldName: null,
-        icaoCode: null,
+        icaoCode: icaoCard,
         contactName: null,
         contactEmail: null,
         contactPhone: null,
@@ -369,6 +382,32 @@ export function parseAeromarktAircraftDetail(
   const locMatch = text.match(/(?:Standort|Heimatflugplatz)[:\s]*([^\n;,]{3,60})/i);
   if (locMatch) location = locMatch[1].trim();
 
+  // Parse city and ICAO from location: "München (EDDM)", "Strausberg EDAY"
+  let city = existing.city;
+  let icaoCode = existing.icaoCode;
+  const locStr = location ?? "";
+  const icaoParenMatchDetail = locStr.match(/\(([A-Z]{4})\)/);
+  if (icaoParenMatchDetail) {
+    icaoCode = icaoParenMatchDetail[1];
+    city = locStr.replace(/\s*\([A-Z]{4}\)/, "").trim().split(/[/,]/)[0].trim() || city;
+  } else if (locStr) {
+    // Try slash notation: "Strausberg/EDAY"
+    const slashIcaoDetailMatch = locStr.match(/\/([A-Z]{4})$/);
+    if (slashIcaoDetailMatch) {
+      icaoCode = slashIcaoDetailMatch[1];
+      city = locStr.replace(/\/[A-Z]{4}$/, "").trim() || city;
+    } else {
+      // Simple location — take first part before any separator
+      const simplCity = locStr.split(/[/(,]/)[0].trim();
+      if (simplCity && simplCity.length >= 2) city = simplCity;
+    }
+  }
+  // Fallback: scan full text for ICAO codes
+  if (!icaoCode) {
+    const icaoDetailFallback = text.match(/\b((?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2})\b/);
+    if (icaoDetailFallback) icaoCode = icaoDetailFallback[1];
+  }
+
   // Empty weight / Leergewicht
   let emptyWeight = existing.emptyWeight;
   const ewMatch = text.match(/(?:Leergewicht|Leermasse)[:\s]*([\d.,]+)\s*kg/i);
@@ -439,6 +478,8 @@ export function parseAeromarktAircraftDetail(
     annualInspection: annualInspection ?? existing.annualInspection,
     engine: engine ?? existing.engine,
     location: location ?? existing.location,
+    city: city ?? existing.city,
+    icaoCode: icaoCode ?? existing.icaoCode,
     registration: registration ?? existing.registration,
     serialNumber: serialNumber ?? existing.serialNumber,
     airworthy: airworthy ?? existing.airworthy,

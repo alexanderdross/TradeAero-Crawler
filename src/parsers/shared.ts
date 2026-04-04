@@ -243,8 +243,11 @@ export function extractCity(location: string | null): string | null {
  * Matches patterns like "Flugplatz Strausberg", "EDAZ", "Heimatflugplatz: EDMT"
  */
 export function extractAirfield(text: string): { name: string | null; icao: string | null } {
-  // ICAO code: 4 uppercase letters starting with ED (Germany), LO (Austria), LS (Switzerland)
-  const icaoMatch = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b/);
+  // ICAO code: 4 uppercase letters with common European prefixes
+  // ED=Germany, LO=Austria, LS=Switzerland, EG=UK, LF=France, EB=Belgium,
+  // LP=Portugal, LE=Spain, LK=Czech, EP=Poland, EH=Netherlands, LI=Italy,
+  // EK=Denmark, ES=Sweden, EN=Norway, EF=Finland
+  const icaoMatch = text.match(/\b((?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2})\b/);
   const icao = icaoMatch ? icaoMatch[1] : null;
 
   // Airfield name patterns
@@ -252,7 +255,8 @@ export function extractAirfield(text: string): { name: string | null; icao: stri
     /(?:Flugplatz|Flughafen|Heimatflugplatz|Heimatflughafen|Flugfeld|Sonderlandeplatz|Verkehrslandeplatz|Landeplatz|UL-Gelände|UL-Platz|stationiert\s+(?:in|am|auf))[:\s]*([^\n•,]+)/i
   );
 
-  const name = airfieldMatch ? cleanText(airfieldMatch[1]).replace(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b\s*/g, "").trim() : null;
+  const ICAO_PATTERN = /\b(?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2}\b/g;
+  const name = airfieldMatch ? cleanText(airfieldMatch[1]).replace(ICAO_PATTERN, "").trim() : null;
 
   return { name: name || null, icao };
 }

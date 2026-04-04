@@ -161,6 +161,39 @@ function parseListingBlock(
   const locationMatch = text.match(/(?:Standort|Location)[:\s]*([^;|\n]+)/i);
   const location = locationMatch ? cleanText(locationMatch[1]) : null;
 
+  // Parse city and ICAO code from location string
+  // Patterns: "München (EDDM)", "Strausberg/EDAY", "München"
+  let city24: string | null = null;
+  let icaoCode24: string | null = null;
+  if (location) {
+    const icaoParenMatch = location.match(/\(([A-Z]{4})\)/);
+    if (icaoParenMatch) {
+      icaoCode24 = icaoParenMatch[1];
+      city24 = location.replace(/\s*\([A-Z]{4}\)/, "").trim().split(/[/,]/)[0].trim() || null;
+    } else {
+      const slashIcaoMatch = location.match(/\/([A-Z]{4})$/);
+      if (slashIcaoMatch) {
+        icaoCode24 = slashIcaoMatch[1];
+        city24 = location.replace(/\/[A-Z]{4}$/, "").trim() || null;
+      } else {
+        city24 = location.split(/[/(,]/)[0].trim() || null;
+      }
+    }
+  }
+  // Fallback: scan full text for ICAO codes if not found in location
+  if (!icaoCode24) {
+    const icaoTextMatch = text.match(/\b((?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2})\b/);
+    if (icaoTextMatch) icaoCode24 = icaoTextMatch[1];
+  }
+  // Detect country from ICAO prefix
+  const ICAO_TO_COUNTRY24: Record<string, string> = {
+    ED: "Germany", LO: "Austria", LS: "Switzerland", EG: "United Kingdom",
+    LF: "France", EB: "Belgium", LP: "Portugal", LE: "Spain",
+    LK: "Czech Republic", EP: "Poland", EH: "Netherlands",
+    LI: "Italy", EK: "Denmark", ES: "Sweden", EN: "Norway", EF: "Finland",
+  };
+  const country24 = icaoCode24 ? (ICAO_TO_COUNTRY24[icaoCode24.substring(0, 2)] ?? null) : null;
+
   // Extract detail page URL
   let detailUrl: string | null = null;
   $("a[href*='--xi']").each((_, el) => {
@@ -212,9 +245,9 @@ function parseListingBlock(
     price: priceInfo.amount,
     priceNegotiable: priceInfo.negotiable,
     location,
-    city: null,
+    city: city24,
     airfieldName: null,
-    icaoCode: null,
+    icaoCode: icaoCode24,
     contactName: null,
     contactEmail: null,
     contactPhone: null,
@@ -223,7 +256,7 @@ function parseListingBlock(
     serialNumber,
     airworthy: airworthy24,
     avionicsText: null,
-    country: null,
+    country: country24,
     emptyWeight: null,
     maxTakeoffWeight: null,
     fuelCapacity: null,

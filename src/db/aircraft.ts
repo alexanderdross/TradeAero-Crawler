@@ -778,7 +778,9 @@ function extractAirfieldFromText(text: string): string | null {
  * German ICAO: EDxx, Austrian: LOxx, Swiss: LSxx
  */
 function extractIcaoFromText(text: string): string | null {
-  const match = text.match(/\b(ED[A-Z]{2}|LO[A-Z]{2}|LS[A-Z]{2})\b/);
+  // Common European ICAO prefixes: ED=DE, LO=AT, LS=CH, EG=UK, LF=FR, EB=BE,
+  // LP=PT, LE=ES, LK=CZ, EP=PL, EH=NL, LI=IT, EK=DK, ES=SE, EN=NO, EF=FI
+  const match = text.match(/\b((?:ED|LO|LS|EG|LF|EB|LP|LE|LK|EP|EH|LI|EK|ES|EN|EF)[A-Z]{2})\b/);
   return match ? match[1] : null;
 }
 
