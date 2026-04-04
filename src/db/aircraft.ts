@@ -830,59 +830,81 @@ function extractPhoneFromText(text: string): string | null {
 }
 
 /**
- * German city → federal state mapping for common aviation locations.
- * Used to auto-populate the `state` field when only city is extracted.
+ * German city → ISO 3166-2 state code mapping for common aviation locations.
+ * Uses the abbreviated state code (BY, BW, RP, ...) to match what user-submitted
+ * listings store via the StateCombobox (codes from the `states` DB table).
  */
 const GERMAN_CITY_TO_STATE: Record<string, string> = {
-  // Bavaria
-  "münchen": "Bavaria", "munich": "Bavaria", "augsburg": "Bavaria", "nürnberg": "Bavaria",
-  "regensburg": "Bavaria", "würzburg": "Bavaria", "ingolstadt": "Bavaria", "straubing": "Bavaria",
-  "landshut": "Bavaria", "rosenheim": "Bavaria", "kempten": "Bavaria", "memmingen": "Bavaria",
-  "bayreuth": "Bavaria", "bamberg": "Bavaria", "passau": "Bavaria", "erding": "Bavaria",
-  "fürstenfeldbruck": "Bavaria", "jesenwang": "Bavaria", "oberschleißheim": "Bavaria",
-  // Baden-Württemberg
-  "stuttgart": "Baden-Württemberg", "karlsruhe": "Baden-Württemberg", "freiburg": "Baden-Württemberg",
-  "mannheim": "Baden-Württemberg", "heidelberg": "Baden-Württemberg", "ulm": "Baden-Württemberg",
-  "friedrichshafen": "Baden-Württemberg", "donaueschingen": "Baden-Württemberg",
-  // Hesse
-  "frankfurt": "Hesse", "wiesbaden": "Hesse", "kassel": "Hesse", "darmstadt": "Hesse",
-  "gießen": "Hesse", "marburg": "Hesse", "fulda": "Hesse", "egelsbach": "Hesse",
-  // North Rhine-Westphalia
-  "köln": "North Rhine-Westphalia", "düsseldorf": "North Rhine-Westphalia", "dortmund": "North Rhine-Westphalia",
-  "essen": "North Rhine-Westphalia", "bonn": "North Rhine-Westphalia", "münster": "North Rhine-Westphalia",
-  "aachen": "North Rhine-Westphalia", "bielefeld": "North Rhine-Westphalia",
-  // Lower Saxony
-  "hannover": "Lower Saxony", "braunschweig": "Lower Saxony", "osnabrück": "Lower Saxony",
-  "oldenburg": "Lower Saxony", "wolfsburg": "Lower Saxony", "hildesheim": "Lower Saxony",
-  // Schleswig-Holstein
-  "kiel": "Schleswig-Holstein", "lübeck": "Schleswig-Holstein", "flensburg": "Schleswig-Holstein",
-  // Rhineland-Palatinate
-  "mainz": "Rhineland-Palatinate", "koblenz": "Rhineland-Palatinate", "trier": "Rhineland-Palatinate",
-  "speyer": "Rhineland-Palatinate",
-  // Saxony
-  "dresden": "Saxony", "leipzig": "Saxony", "chemnitz": "Saxony",
-  // Brandenburg
-  "potsdam": "Brandenburg", "strausberg": "Brandenburg", "cottbus": "Brandenburg",
-  // Thuringia
-  "erfurt": "Thuringia", "jena": "Thuringia", "weimar": "Thuringia",
-  // Saxony-Anhalt
-  "magdeburg": "Saxony-Anhalt", "halle": "Saxony-Anhalt",
-  // Mecklenburg-Vorpommern
-  "rostock": "Mecklenburg-Vorpommern", "schwerin": "Mecklenburg-Vorpommern",
-  // Saarland
-  "saarbrücken": "Saarland",
+  // Bavaria (BY)
+  "münchen": "BY", "munich": "BY", "augsburg": "BY", "nürnberg": "BY",
+  "regensburg": "BY", "würzburg": "BY", "ingolstadt": "BY", "straubing": "BY",
+  "landshut": "BY", "rosenheim": "BY", "kempten": "BY", "memmingen": "BY",
+  "bayreuth": "BY", "bamberg": "BY", "passau": "BY", "erding": "BY",
+  "fürstenfeldbruck": "BY", "jesenwang": "BY", "oberschleißheim": "BY",
+  "landsberg": "BY", "kaufbeuren": "BY", "weilheim": "BY", "garmisch": "BY",
+  "traunstein": "BY", "altötting": "BY", "deggendorf": "BY",
+  // Baden-Württemberg (BW)
+  "stuttgart": "BW", "karlsruhe": "BW", "freiburg": "BW",
+  "mannheim": "BW", "heidelberg": "BW", "ulm": "BW",
+  "friedrichshafen": "BW", "donaueschingen": "BW", "konstanz": "BW",
+  "heilbronn": "BW", "pforzheim": "BW", "reutlingen": "BW",
+  "leutkirch": "BW", "biberach": "BW", "ravensburg": "BW",
+  // Hesse (HE)
+  "frankfurt": "HE", "wiesbaden": "HE", "kassel": "HE", "darmstadt": "HE",
+  "gießen": "HE", "marburg": "HE", "fulda": "HE", "egelsbach": "HE",
+  "offenbach": "HE", "hanau": "HE", "bad homburg": "HE",
+  // North Rhine-Westphalia (NW)
+  "köln": "NW", "düsseldorf": "NW", "dortmund": "NW",
+  "essen": "NW", "bonn": "NW", "münster": "NW",
+  "aachen": "NW", "bielefeld": "NW", "wuppertal": "NW",
+  "bochum": "NW", "duisburg": "NW", "paderborn": "NW",
+  // Lower Saxony (NI)
+  "hannover": "NI", "braunschweig": "NI", "osnabrück": "NI",
+  "oldenburg": "NI", "wolfsburg": "NI", "hildesheim": "NI",
+  "göttingen": "NI", "celle": "NI", "wilhelmshaven": "NI",
+  // Schleswig-Holstein (SH)
+  "kiel": "SH", "lübeck": "SH", "flensburg": "SH",
+  "neumünster": "SH", "husum": "SH", "heide": "SH",
+  // Rhineland-Palatinate (RP)
+  "mainz": "RP", "koblenz": "RP", "trier": "RP", "speyer": "RP",
+  "kaiserslautern": "RP", "ludwigshafen": "RP", "neustadt": "RP",
+  // Saxony (SN)
+  "dresden": "SN", "leipzig": "SN", "chemnitz": "SN",
+  "zwickau": "SN", "plauen": "SN",
+  // Brandenburg (BB)
+  "potsdam": "BB", "strausberg": "BB", "cottbus": "BB",
+  "frankfurt an der oder": "BB", "eberswalde": "BB",
+  // Thuringia (TH)
+  "erfurt": "TH", "jena": "TH", "weimar": "TH",
+  "gera": "TH", "gotha": "TH", "eisenach": "TH",
+  // Saxony-Anhalt (ST)
+  "magdeburg": "ST", "halle": "ST", "dessau": "ST",
+  // Mecklenburg-Vorpommern (MV)
+  "rostock": "MV", "schwerin": "MV", "greifswald": "MV",
+  "stralsund": "MV", "neubrandenburg": "MV",
+  // Saarland (SL)
+  "saarbrücken": "SL", "saarlouis": "SL", "homburg": "SL",
   // City-states
-  "berlin": "Berlin", "hamburg": "Hamburg", "bremen": "Bremen",
+  "berlin": "BE", "hamburg": "HH", "bremen": "HB",
 };
 
 /** Words that indicate description text leaked into a city/location field */
 const JUNK_LOCATION_WORDS = [
+  // German spec/listing words
   "verkauf", "privatverkauf", "angebot", "flugzeug", "flugzeuges", "aircraft",
   "kontaktdaten", "kontakt", "email", "telefon", "tel", "mobil", "handy",
   "segelfliegergruppe", "segelfluggelände", "verein", "viehheide",
   "mittelhessen", "wartet", "biete", "suche", "hello", "offering",
   "selling", "price", "preis", "baujahr", "betriebsstunden", "motor",
   "data", "sheet", "info", "noreply", "description", "details",
+  // Spec units / measurements (leaked from listing body)
+  "stunden", "std", " ps", " kw", " hp", " kg", " km", " nm",
+  // Location qualifiers that may appear without a real city
+  "raum", "nähe", "region", "gebiet", "umgebung", "süd", "nord", "ost", "west",
+  "deutschlandweit", "bundesweit", "europaweit", "weltweit",
+  // Other noise
+  "privatperson", "privatverkäufer", "händler", "dealer", "broker",
+  "anfrage", "anfragen", "weiteres", "siehe", "more", "view",
 ];
 
 /**
@@ -894,30 +916,41 @@ function sanitizeCity(raw: string | null): string | null {
   const trimmed = raw.trim();
 
   // Too short or too long for a city name
-  if (trimmed.length < 2 || trimmed.length > 40) return null;
+  if (trimmed.length < 2 || trimmed.length > 35) return null;
 
   // Contains multiple lines or bullet points → description bleed
   if (/[\n•]/.test(trimmed)) return null;
 
-  // Contains email-like patterns
-  if (/@|\.com|\.de|\.net/.test(trimmed)) return null;
+  // Contains email-like patterns or URLs
+  if (/@|\.com|\.de|\.net|\.org|https?:\/\//.test(trimmed)) return null;
 
-  // Contains phone numbers
-  if (/\+?\d{5,}/.test(trimmed)) return null;
+  // Contains any digit (city names never have digits; spec values do)
+  if (/\d/.test(trimmed)) return null;
+
+  // All uppercase (likely an abbreviation or ICAO code, not a city)
+  if (trimmed === trimmed.toUpperCase() && trimmed.length > 3) return null;
 
   // Check for junk words (description leaking into location)
   const lower = trimmed.toLowerCase();
   if (JUNK_LOCATION_WORDS.some((w) => lower.includes(w))) return null;
 
-  // Must start with uppercase letter (German city names always do)
+  // Must start with uppercase letter (German/European city names always do)
   if (!/^[A-ZÄÖÜ]/.test(trimmed)) return null;
 
   // If it's a known city, always accept
   if (GERMAN_CITY_TO_STATE[lower]) return trimmed;
 
-  // Max 4 words for an unknown city (e.g. "Bad Aibling am Inn")
+  // Unknown city: max 3 words (e.g. "Bad Aibling", "Frankfurt am Main")
   const wordCount = trimmed.split(/\s+/).length;
-  if (wordCount > 4) return null;
+  if (wordCount > 3) return null;
+
+  // Unknown city: each word must start with uppercase or be a short connector
+  const CONNECTORS = new Set(["am", "an", "im", "in", "bei", "de", "la", "le", "van", "von", "den"]);
+  const words = trimmed.split(/\s+/);
+  const validWords = words.every(
+    (w) => /^[A-ZÄÖÜ]/.test(w) || CONNECTORS.has(w.toLowerCase())
+  );
+  if (!validWords) return null;
 
   return trimmed;
 }
