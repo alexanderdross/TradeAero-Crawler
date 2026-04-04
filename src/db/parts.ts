@@ -96,9 +96,11 @@ export async function upsertPartsListing(
 
   const record = mapToPartsRow(listing, systemUserId, images, translations);
 
-  const { error } = await supabase
+  const { data: inserted, error } = await supabase
     .from("parts_listings")
-    .insert(record);
+    .insert(record)
+    .select("id, slug, listing_number")
+    .single();
 
   if (error) {
     const level = error.message?.includes("check constraint") ? "warn" : "error";
@@ -108,7 +110,30 @@ export async function upsertPartsListing(
     });
     return "skipped";
   }
-  logger.debug("Inserted parts listing", { sourceId: listing.sourceId });
+
+  // Generate proper localized slugs using the DB-assigned listing_number
+  // (mirrors aircraft.ts — without listing_number suffix, duplicate titles share the same slug_en
+  //  causing maybeSingle() to fail on the detail page)
+  const listingNum = (inserted as { listing_number?: number | null }).listing_number ?? null;
+  if (listingNum && translations) {
+    const slugUpdate: Record<string, string> = {};
+    // slug_en = trigger-generated base slug (already has listing_number suffix)
+    if ((inserted as { slug?: string | null }).slug) {
+      slugUpdate.slug_en = (inserted as { slug: string }).slug;
+    }
+    for (const lang of LANGS) {
+      if (lang === "en") continue;
+      const headline = (record as Record<string, unknown>)[`headline_${lang}`];
+      if (headline && typeof headline === "string" && headline.trim()) {
+        slugUpdate[`slug_${lang}`] = generateSlug(headline, listingNum);
+      }
+    }
+    if (Object.keys(slugUpdate).length > 0) {
+      await supabase.from("parts_listings").update(slugUpdate).eq("id", (inserted as { id: string }).id);
+    }
+  }
+
+  logger.debug("Inserted parts listing", { sourceId: listing.sourceId, listingNumber: listingNum });
   return "inserted";
 }
 
