@@ -302,6 +302,26 @@ function detectCategoryName(title: string, description: string, engine: string |
  * Extract engine power from engine description.
  * E.g., "Rotax 912ULS 100 PS" → { power: "100", unit: "PS", type: "Rotax 912ULS" }
  */
+/** Known engine model patterns — ordered from most to least specific */
+const ENGINE_MODEL_RE = [
+  /Rotax\s+\d+[\w.\s-]*/i,
+  /Lycoming\s+[A-Z]{1,3}[-\d][\w.\s-]*/i,
+  /Continental\s+[A-Z]{1,3}[-\d][\w.\s-]*/i,
+  /Jabiru\s+\d+[\w.\s-]*/i,
+  /HKS\s+\d+[\w.\s-]*/i,
+  /Limbach\s+[LT]\s*\d+[\w.\s-]*/i,
+  /Simonini\s+[\w\d.\s-]*/i,
+  /Solo\s+\d+[\w.\s-]*/i,
+  /BMW\s+[\w\d.\s-]*/i,
+  /ULPower\s+[\w\d.\s-]*/i,
+  /D-Motor\s+[\w\d.\s-]*/i,
+  /Sauer\s+[\w\d.\s-]*/i,
+  /Hirth\s+\d+[\w.\s-]*/i,
+];
+
+/** Delimiters that indicate the engine field has overflowed into description text */
+const ENGINE_OVERFLOW_RE = /\s*(?:Motorstunden|Motorbetriebsstunden|TTSN|TTAF|Zelle|Ausstattung|Baujahr|\bTT\b|\b\d{3,}\s*h\b|,\s*(?:wird|kann|ist\s)|Funk\s|Transponder|Flarm|FLARM)/i;
+
 function parseEnginePower(engine: string | null): {
   power: string | null;
   unit: string | null;
@@ -313,11 +333,23 @@ function parseEnginePower(engine: string | null): {
   const power = powerMatch ? powerMatch[1] : null;
   const unit = powerMatch ? powerMatch[2].toUpperCase() : null;
 
-  // Engine type is everything before the power number
-  const typeMatch = engine.match(/^(.+?)(?:\s+\d+\s*(?:PS|HP|kW))/i);
-  const type = typeMatch ? typeMatch[1].trim() : engine.trim();
+  // Try to extract a known engine model name first
+  for (const re of ENGINE_MODEL_RE) {
+    const m = engine.match(re);
+    if (m) {
+      // Truncate the match at overflow delimiters
+      const raw = m[0].replace(ENGINE_OVERFLOW_RE, "").trim();
+      const type = raw.slice(0, 60).trim();
+      if (type.length >= 3) return { power, unit, type };
+    }
+  }
 
-  return { power, unit, type };
+  // Fallback: everything before the power number, truncated at overflow delimiters
+  const typeMatch = engine.match(/^(.+?)(?:\s+\d+\s*(?:PS|HP|kW))/i);
+  let type = typeMatch ? typeMatch[1].trim() : engine.trim();
+  type = type.replace(ENGINE_OVERFLOW_RE, "").trim().slice(0, 60);
+
+  return { power, unit, type: type.length >= 3 ? type : null };
 }
 
 /**

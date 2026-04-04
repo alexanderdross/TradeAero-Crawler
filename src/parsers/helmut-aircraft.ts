@@ -213,9 +213,16 @@ function extractSpecs(text: string): ExtractedSpecs {
   const yearMatch = text.match(/Baujahr[:\s]*(\d{4})/i);
   if (yearMatch) specs.year = parseInt(yearMatch[1], 10);
 
-  // Motor (engine)
-  const engineMatch = text.match(/Motor[:\s]*([^•\n]+)/i);
-  if (engineMatch) specs.engine = cleanText(engineMatch[1]);
+  // Motor (engine) — capture up to 80 chars then strip overflow delimiters
+  const engineMatch = text.match(/Motor[:\s]*([^•\n]{3,80})/i);
+  if (engineMatch) {
+    let eng = cleanText(engineMatch[1]);
+    // Truncate at tokens that signal the engine field has overflowed into description text
+    eng = eng.replace(/\s*(?:Motorstunden|Motorbetriebsstunden|Motor-Std|Motor-BZ|TTSN|TTAF|Zelle|Ausstattung|Baujahr|\bTT\b|\b\d{3,}\s*h\b).*/i, "").trim();
+    // Also stop at a dash that introduces avionics ("- Funk", "- Transponder", etc.)
+    eng = eng.replace(/\s+-\s+(?:Funk|Transponder|Flarm|FLARM|GPS|MGL|Garmin|ADS|VHF|UKW|Stratos|ELT|Avionik).*/i, "").trim();
+    if (eng.length >= 3) specs.engine = eng;
+  }
 
   // Betriebsstunden / TT (total airframe time / TTAF)
   const ttMatch =
