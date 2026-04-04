@@ -61,8 +61,8 @@ export interface ParsedPartsListing {
   postedDate: string | null;
   title: string;
   description: string;
-  /** Inferred category: avionics, engines, rescue, miscellaneous */
-  category: "avionics" | "engines" | "rescue" | "miscellaneous";
+  /** Inferred category */
+  category: "avionics" | "engines" | "propellers" | "instruments" | "rescue" | "miscellaneous";
   /** Operating hours / TTSN */
   totalTime: number | null;
   /** Condition description */

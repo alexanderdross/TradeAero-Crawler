@@ -64,22 +64,28 @@ export function parsePartsPage(
 
 /**
  * Detect if a block is a category header and return the category.
+ *
+ * A header block is short (< 200 chars after stripping tags) and contains
+ * no price indicators or dates — those are listing content, not headers.
  */
 function detectCategory(blockHtml: string): ParsedPartsListing["category"] | null {
-  const text = blockHtml.replace(/<[^>]+>/g, "").trim().toLowerCase();
+  const text = blockHtml.replace(/<[^>]+>/g, "").trim();
+  const lower = text.toLowerCase();
 
-  if (/avionik|navigationsger|transponder|funkger/i.test(text) && text.length < 100) {
-    return "avionics";
-  }
-  if (/motor(?:en)?(?:\s|$)|triebwerk/i.test(text) && text.length < 100) {
-    return "engines";
-  }
-  if (/rettung|rettungsger|rettungssystem/i.test(text) && text.length < 100) {
-    return "rescue";
-  }
-  if (/sonstig|zubehör|diverses/i.test(text) && text.length < 100) {
-    return "miscellaneous";
-  }
+  // Must be short and must NOT look like a listing (no price, no date pattern)
+  const looksLikeListing =
+    /\d{2}\.\d{2}\.\d{4}/.test(text) ||   // German date dd.mm.yyyy
+    /€|eur|\d+[.,]\d{2}/.test(lower) ||    // price
+    text.length > 200;
+
+  if (looksLikeListing) return null;
+
+  if (/avionik|navigationsger|transponder|funkger|avionics/i.test(lower)) return "avionics";
+  if (/motor(?:en)?(?:\s|\/|$)|triebwerk|engine/i.test(lower)) return "engines";
+  if (/propeller|luftschraube/i.test(lower)) return "propellers";
+  if (/instrument|anzeige|cockpit/i.test(lower)) return "instruments";
+  if (/rettung|rettungsger|rettungssystem|fallschirm/i.test(lower)) return "rescue";
+  if (/sonstig|zubehör|diverses|misc/i.test(lower)) return "miscellaneous";
 
   return null;
 }
