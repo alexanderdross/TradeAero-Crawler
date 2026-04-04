@@ -180,6 +180,19 @@ function parseListingBlock(
 
   const sourceId = generateSourceId(pageUrl, index, detailUrl ?? undefined);
 
+  // Registration
+  const regMatch = text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
+  const registration = regMatch ? regMatch[1] : null;
+
+  // Serial number
+  const serialMatch24 = text.match(/(?:Werk[- ]?Nr\.?|S\/N|Seriennummer|Serial)[:\s]*([A-Z0-9][\w-]{1,20})/i);
+  const serialNumber = serialMatch24 ? serialMatch24[1].trim() : null;
+
+  // Airworthy
+  let airworthy24: boolean | null = null;
+  if (/nicht\s*(?:luft|verkehrs)tüchtig|not\s+airworthy/i.test(text)) airworthy24 = false;
+  else if (/(?:luft|verkehrs)tüchtig|airworthy|LTB\s+vorhanden/i.test(text)) airworthy24 = true;
+
   return {
     sourceId: detailUrl ? `${sourceName}:${detailUrl}` : sourceId,
     sourceUrl: pageUrl,
@@ -206,6 +219,11 @@ function parseListingBlock(
     contactEmail: null,
     contactPhone: null,
     imageUrls: images,
+    registration,
+    serialNumber,
+    airworthy: airworthy24,
+    avionicsText: null,
+    country: null,
   };
 }
 

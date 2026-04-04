@@ -117,6 +117,8 @@ function parseBlock(
     year: specs.year,
     engine: specs.engine,
     totalTime: specs.totalTime,
+    engineHours: null,
+    cycles: null,
     mtow: specs.mtow,
     rescueSystem: specs.rescue,
     annualInspection: specs.jnp,
@@ -131,6 +133,11 @@ function parseBlock(
     contactEmail: contact.email,
     contactPhone: contact.phone,
     imageUrls: images,
+    registration: null,
+    serialNumber: null,
+    airworthy: null,
+    avionicsText: null,
+    country: null,
   };
 }
 

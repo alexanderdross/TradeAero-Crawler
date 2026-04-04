@@ -610,8 +610,8 @@ async function mapToAircraftRow(
 
   // Extract registration and serial number from title + description
   const listingFullText = `${listing.title} ${listing.description}`;
-  const registration = extractRegistration(listingFullText) ?? "N/A";
-  const serialNumber = extractSerialNumber(listingFullText) ?? "N/A";
+  const registration = listing.registration ?? extractRegistration(listingFullText) ?? "N/A";
+  const serialNumber = listing.serialNumber ?? extractSerialNumber(listingFullText) ?? "N/A";
 
   return {
     headline: cleanHeadline,
@@ -622,7 +622,7 @@ async function mapToAircraftRow(
     location: sanitizeCity(listing.location) ?? city ?? "Germany",
     city: city ?? null,
     state: resolveGermanState(city),
-    country: "Germany",
+    country: listing.country ?? "Germany",
     price: hasValidPrice ? listing.price : null,
     currency: config.defaultCurrency,
     price_negotiable: listing.priceNegotiable ?? false,
@@ -679,6 +679,8 @@ async function mapToAircraftRow(
     max_takeoff_weight: listing.mtow?.toString() ?? null,
     max_takeoff_weight_unit: listing.mtow ? "kg" : null,
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
+    airworthy: listing.airworthy !== null ? (listing.airworthy ? "yes" : "no") : null,
+    avionics_other: listing.avionicsText ?? null,
 
     // Images — enriched with per-locale alt text from translations
     images: enrichImagesWithLocalizedAlt(uploadedImages, listing.title, translations),

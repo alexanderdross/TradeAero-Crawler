@@ -133,6 +133,11 @@ function parseBlock(
     city,
     airfieldName: airfield.name,
     icaoCode: airfield.icao,
+    registration: specs.registration,
+    serialNumber: specs.serialNumber,
+    airworthy: specs.airworthy,
+    avionicsText: specs.avionicsText,
+    country: null,
     contactName: contact.name,
     contactEmail: contact.email,
     contactPhone: contact.phone,
@@ -151,6 +156,10 @@ interface ExtractedSpecs {
   rescue: string | null;
   jnp: string | null;
   dulv: string | null;
+  registration: string | null;
+  serialNumber: string | null;
+  airworthy: boolean | null;
+  avionicsText: string | null;
 }
 
 function extractSpecs(text: string): ExtractedSpecs {
@@ -164,6 +173,10 @@ function extractSpecs(text: string): ExtractedSpecs {
     rescue: null,
     jnp: null,
     dulv: null,
+    registration: null,
+    serialNumber: null,
+    airworthy: null,
+    avionicsText: null,
   };
 
   // Baujahr (year of manufacture)
@@ -205,6 +218,39 @@ function extractSpecs(text: string): ExtractedSpecs {
   // DULV Kennblatt
   const dulvMatch = text.match(/DULV[- ]?Kennblatt[:\s]*([^\n•]+)/i);
   if (dulvMatch) specs.dulv = cleanText(dulvMatch[1]);
+
+  // Registration / Kennzeichen
+  const regKennMatch = text.match(/(?:Kennzeichen|Kennz\.?|Zulassung)[:\s]*([A-Z]{1,2}-[A-Z0-9]{2,5})/i);
+  if (regKennMatch) {
+    specs.registration = regKennMatch[1];
+  } else {
+    const regFreeMatch = text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
+    if (regFreeMatch) specs.registration = regFreeMatch[1];
+  }
+
+  // Serial number / Werk-Nr.
+  const serialMatch = text.match(/(?:Werk[- ]?Nr\.?|S\/N|Seriennummer|Serial)[:\s]*([A-Z0-9][\w-]{1,20})/i);
+  if (serialMatch) specs.serialNumber = serialMatch[1].trim();
+
+  // Airworthiness
+  if (/nicht\s*(?:luft|verkehrs)tüchtig|not\s+airworthy/i.test(text)) {
+    specs.airworthy = false;
+  } else if (/(?:luft|verkehrs)tüchtig(?!\s*zeugnis)|LTB\s+vorhanden|airworthy/i.test(text)) {
+    specs.airworthy = true;
+  }
+
+  // Avionics free-text: collect lines that mention avionics equipment
+  const AVIONICS_KEYWORDS = ['GPS', 'Transponder', 'Funke', 'VOR', 'ILS', 'ADS-B', 'FLARM',
+    'Autopilot', 'Garmin', 'Dynon', 'Becker', 'Trig', 'Bendix', 'King',
+    'SkyDemon', 'SkyView', 'XPNDR', 'Mode-S', 'Mode-C', 'TCAS'];
+  const avLines: string[] = [];
+  for (const segment of text.split(/[•\n]/)) {
+    const seg = segment.trim();
+    if (seg.length > 2 && seg.length < 200 && AVIONICS_KEYWORDS.some(k => seg.includes(k))) {
+      avLines.push(seg);
+    }
+  }
+  if (avLines.length > 0) specs.avionicsText = avLines.join('; ');
 
   return specs;
 }
