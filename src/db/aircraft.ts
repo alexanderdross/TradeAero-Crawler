@@ -613,6 +613,9 @@ async function mapToAircraftRow(
   const registration = listing.registration ?? extractRegistration(listingFullText) ?? "N/A";
   const serialNumber = listing.serialNumber ?? extractSerialNumber(listingFullText) ?? "N/A";
 
+  // Detect equipment feature IDs from listing text
+  const featureIds = await detectFeatureIds(listingFullText);
+
   return {
     headline: cleanHeadline,
     model,
@@ -651,9 +654,6 @@ async function mapToAircraftRow(
     // Seats
     seats,
 
-    // Fuel type: Rotax engines always use MOGAS
-    fuel_type: listing.engine?.toLowerCase().includes("rotax") ? "MOGAS" : null,
-
     // All 14 locale columns
     ...localeFields,
 
@@ -676,11 +676,33 @@ async function mapToAircraftRow(
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
     engine_hours: listing.engineHours && listing.engineHours > 0 ? listing.engineHours : null,
     cycles: listing.cycles && listing.cycles > 0 ? listing.cycles : null,
-    max_takeoff_weight: listing.mtow?.toString() ?? null,
-    max_takeoff_weight_unit: listing.mtow ? "kg" : null,
+    max_takeoff_weight: listing.mtow?.toString() ?? listing.maxTakeoffWeight?.toString() ?? null,
+    max_takeoff_weight_unit: (listing.mtow || listing.maxTakeoffWeight) ? "kg" : null,
+    empty_weight: listing.emptyWeight?.toString() ?? null,
+    empty_weight_unit: listing.emptyWeight ? "kg" : null,
+    fuel_capacity: listing.fuelCapacity?.toString() ?? null,
+    fuel_capacity_unit: listing.fuelCapacity ? "L" : null,
+    fuel_type: listing.engine?.toLowerCase().includes("rotax") ? "MOGAS" : (listing.fuelType ?? null),
+    cruise_speed: listing.cruiseSpeed?.toString() ?? null,
+    cruise_speed_unit: listing.cruiseSpeed ? "km/h" : null,
+    max_speed: listing.maxSpeed?.toString() ?? null,
+    max_speed_unit: listing.maxSpeed ? "km/h" : null,
+    max_range: listing.maxRange?.toString() ?? null,
+    max_range_unit: listing.maxRange ? "km" : null,
+    service_ceiling: listing.serviceCeiling?.toString() ?? null,
+    service_ceiling_unit: listing.serviceCeiling ? "m" : null,
+    performance_climb_rate: listing.climbRate?.toString() ?? null,
+    performance_climb_rate_unit: listing.climbRate ? "m/s" : null,
+    performance_fuel_consumption: listing.fuelConsumption?.toString() ?? null,
+    performance_fuel_consumption_unit: listing.fuelConsumption ? "L/h" : null,
     last_annual_inspection: isValidIsoDate(listing.annualInspection) ? listing.annualInspection : null,
     airworthy: listing.airworthy !== null ? (listing.airworthy ? "yes" : "no") : null,
-    avionics_other: listing.avionicsText ?? null,
+
+    // Avionics — classified into specific columns; reference_specs fills remaining nulls
+    ...classifyAvionicsText(listing.avionicsText ?? null),
+
+    // Equipment features — detected from listing text via aircraft_features DB lookup
+    feature_ids: featureIds.length > 0 ? featureIds : null,
 
     // Images — enriched with per-locale alt text from translations
     images: enrichImagesWithLocalizedAlt(uploadedImages, listing.title, translations),
@@ -912,7 +934,86 @@ function isValidIsoDate(value: string | null | undefined): boolean {
 }
 
 /**
+ * Classify raw avionics text into specific DB columns.
+ * Priority: TCAS/traffic > Transponder/ADS-B > Autopilot > GPS/Nav > Radios > Other
+ */
+function classifyAvionicsText(raw: string | null): {
+  avionics_gps: string | null;
+  avionics_autopilot: string | null;
+  avionics_radios: string | null;
+  avionics_transponder: string | null;
+  avionics_tcas: string | null;
+  avionics_other: string | null;
+} {
+  const empty = { avionics_gps: null, avionics_autopilot: null, avionics_radios: null, avionics_transponder: null, avionics_tcas: null, avionics_other: null };
+  if (!raw) return empty;
+
+  const segments = raw.split(/[;]+/).map((s) => s.trim()).filter((s) => s.length > 2);
+  const gps: string[] = [], ap: string[] = [], radio: string[] = [], xpdr: string[] = [], tcas: string[] = [], other: string[] = [];
+
+  const GPS_KW   = ['GPS', 'GNSS', 'Garmin', 'Dynon', 'SkyDemon', 'SkyView', 'EFIS', 'Glass Cockpit', 'G430', 'G500', 'G600', 'GTN', 'GNS', 'Moving Map', 'MFD', 'PFD', 'Navigat', 'Navi', 'Avmap', 'Naviter'];
+  const AP_KW    = ['Autopilot', 'Autoflight', 'Autoland', 'AP '];
+  const RADIO_KW = ['Funk', 'COM ', ' COM', 'NAV ', ' NAV', 'VOR', 'ILS', 'DME', 'ADF', 'Becker', 'Trig', 'Bendix', 'King', 'Radio', 'KY-', 'KX-', 'AR ', 'SL40', 'SL30', 'KT-', 'Frequenz', 'Sprechfunk', 'UKW'];
+  const XPDR_KW  = ['Transponder', 'XPDR', 'XPNDR', 'Mode-S', 'Mode S', 'Mode-C', 'Mode C', 'ADS-B', 'ADSB', 'GTX', 'Squawk'];
+  const TCAS_KW  = ['TCAS', 'FLARM', 'PowerFLARM', 'Traffic Alert', 'PCAS', 'Kollisions', 'TAS '];
+
+  for (const seg of segments) {
+    if (TCAS_KW.some((k) => seg.includes(k)))       tcas.push(seg);
+    else if (XPDR_KW.some((k) => seg.includes(k)))  xpdr.push(seg);
+    else if (AP_KW.some((k) => seg.includes(k)))    ap.push(seg);
+    else if (GPS_KW.some((k) => seg.includes(k)))   gps.push(seg);
+    else if (RADIO_KW.some((k) => seg.includes(k))) radio.push(seg);
+    else                                              other.push(seg);
+  }
+
+  return {
+    avionics_gps:         gps.length   > 0 ? gps.join(', ')   : null,
+    avionics_autopilot:   ap.length    > 0 ? ap.join(', ')    : null,
+    avionics_radios:      radio.length > 0 ? radio.join(', ') : null,
+    avionics_transponder: xpdr.length  > 0 ? xpdr.join(', ')  : null,
+    avionics_tcas:        tcas.length  > 0 ? tcas.join(', ')  : null,
+    avionics_other:       other.length > 0 ? other.join(', ') : null,
+  };
+}
+
+/** Cache of aircraft_features for keyword matching */
+let featuresCache: Array<{ id: number; name: string }> | null = null;
+
+async function loadFeaturesCache(): Promise<Array<{ id: number; name: string }>> {
+  if (featuresCache) return featuresCache;
+  const { data } = await supabase.from("aircraft_features").select("id, name");
+  featuresCache = (data ?? []).filter((f: any) => f.id && f.name) as Array<{ id: number; name: string }>;
+  return featuresCache;
+}
+
+/**
+ * Detect aircraft feature IDs by matching listing text against known aircraft_features names.
+ * Only matches meaningful keywords (4+ chars) to avoid false positives.
+ */
+async function detectFeatureIds(text: string): Promise<number[]> {
+  const features = await loadFeaturesCache();
+  const textLower = text.toLowerCase();
+  const matched: number[] = [];
+
+  for (const feature of features) {
+    const nameLower = feature.name.toLowerCase();
+    // Split feature name into key terms, skip short stop-words
+    const keyTerms = nameLower
+      .split(/[\s/,\-()]+/)
+      .filter((t) => t.length >= 4)
+      .filter((t) => !['with', 'and', 'the', 'for', 'system'].includes(t));
+
+    if (keyTerms.length > 0 && keyTerms.some((term) => textLower.includes(term))) {
+      matched.push(feature.id);
+    }
+  }
+
+  return matched;
+}
+
+/**
  * Log a draft listing to admin_activity_logs for review.
+ * Admin dashboard shows these under the Activity tab.
  * Admin dashboard shows these under the Activity tab.
  */
 async function logDraftForReview(title: string, sourceId: string, guessedManufacturer: string): Promise<void> {

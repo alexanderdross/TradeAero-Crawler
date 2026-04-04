@@ -141,6 +141,16 @@ export function parseAeromarktAircraftPage(
         airworthy: null,
         avionicsText: null,
         country: null,
+        emptyWeight: null,
+        maxTakeoffWeight: null,
+        fuelCapacity: null,
+        fuelType: null,
+        cruiseSpeed: null,
+        maxSpeed: null,
+        maxRange: null,
+        serviceCeiling: null,
+        climbRate: null,
+        fuelConsumption: null,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -359,6 +369,57 @@ export function parseAeromarktAircraftDetail(
   const locMatch = text.match(/(?:Standort|Heimatflugplatz)[:\s]*([^\n;,]{3,60})/i);
   if (locMatch) location = locMatch[1].trim();
 
+  // Empty weight / Leergewicht
+  let emptyWeight = existing.emptyWeight;
+  const ewMatch = text.match(/(?:Leergewicht|Leermasse)[:\s]*([\d.,]+)\s*kg/i);
+  if (ewMatch) emptyWeight = parseNum(ewMatch[1]);
+
+  // Max takeoff weight / MTOW
+  let maxTakeoffWeight = existing.maxTakeoffWeight;
+  const mtowMatch = text.match(/(?:MTOW|Abflugmasse|Abfluggewicht|MAUW)[:\s]*([\d.,]+)\s*kg/i);
+  if (mtowMatch) maxTakeoffWeight = parseNum(mtowMatch[1]);
+
+  // Fuel capacity / Tankinhalt
+  let fuelCapacity = existing.fuelCapacity;
+  const fuelCapMatch = text.match(/(?:Tankinhalt|Kraftstoffmenge|Tank)[:\s]*([\d.,]+)\s*[lL]/i);
+  if (fuelCapMatch) fuelCapacity = parseNum(fuelCapMatch[1]);
+
+  // Fuel type
+  let fuelType = existing.fuelType;
+  if (/MOGAS|Normalbenzin|Super(?!flug)/i.test(text)) fuelType = "MOGAS";
+  else if (/AVGAS|100LL/i.test(text)) fuelType = "AVGAS";
+  else if (/Jet.?A|Kerosin|Diesel/i.test(text)) fuelType = "Jet-A";
+
+  // Cruise speed / Reisegeschwindigkeit
+  let cruiseSpeed = existing.cruiseSpeed;
+  const cruiseMatch = text.match(/(?:Reisegeschwindigkeit|Reise(?:geschw\.?)?|Vcr)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
+  if (cruiseMatch) cruiseSpeed = parseNum(cruiseMatch[1]);
+
+  // Max speed / Vne / Höchstgeschwindigkeit
+  let maxSpeed = existing.maxSpeed;
+  const maxSpdMatch = text.match(/(?:Höchstgeschwindigkeit|Vne|Vmax)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
+  if (maxSpdMatch) maxSpeed = parseNum(maxSpdMatch[1]);
+
+  // Range / Reichweite
+  let maxRange = existing.maxRange;
+  const rangeMatch = text.match(/(?:Reichweite|Range)[:\s]*([\d.,]+)\s*(?:km|nm)/i);
+  if (rangeMatch) maxRange = parseNum(rangeMatch[1]);
+
+  // Service ceiling / Gipfelhöhe
+  let serviceCeiling = existing.serviceCeiling;
+  const ceilMatch = text.match(/(?:Gipfelhöhe|Dienstgipfelhöhe|Betriebshöhe)[:\s]*([\d.,]+)\s*(?:m|ft)/i);
+  if (ceilMatch) serviceCeiling = parseNum(ceilMatch[1]);
+
+  // Climb rate / Steigleistung
+  let climbRate = existing.climbRate;
+  const climbMatch = text.match(/(?:Steigleistung|Steigrate)[:\s]*([\d.,]+)\s*(?:m\/s|ft\/min)/i);
+  if (climbMatch) climbRate = parseNum(climbMatch[1]);
+
+  // Fuel consumption / Verbrauch
+  let fuelConsumption = existing.fuelConsumption;
+  const consumMatch = text.match(/(?:Verbrauch|Kraftstoffverbrauch)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h)/i);
+  if (consumMatch) fuelConsumption = parseNum(consumMatch[1]);
+
   // Images from detail page (may have more than index page)
   const detailImages: string[] = [];
   $("img").each((_, el) => {
@@ -383,6 +444,16 @@ export function parseAeromarktAircraftDetail(
     airworthy: airworthy ?? existing.airworthy,
     avionicsText: avionicsText ?? existing.avionicsText,
     country: country ?? existing.country,
+    emptyWeight: emptyWeight ?? existing.emptyWeight,
+    maxTakeoffWeight: maxTakeoffWeight ?? existing.maxTakeoffWeight,
+    fuelCapacity: fuelCapacity ?? existing.fuelCapacity,
+    fuelType: fuelType ?? existing.fuelType,
+    cruiseSpeed: cruiseSpeed ?? existing.cruiseSpeed,
+    maxSpeed: maxSpeed ?? existing.maxSpeed,
+    maxRange: maxRange ?? existing.maxRange,
+    serviceCeiling: serviceCeiling ?? existing.serviceCeiling,
+    climbRate: climbRate ?? existing.climbRate,
+    fuelConsumption: fuelConsumption ?? existing.fuelConsumption,
     imageUrls: detailImages.length > existing.imageUrls.length ? detailImages : existing.imageUrls,
   };
 }

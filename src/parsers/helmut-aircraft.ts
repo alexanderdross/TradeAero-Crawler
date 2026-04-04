@@ -138,6 +138,16 @@ function parseBlock(
     airworthy: specs.airworthy,
     avionicsText: specs.avionicsText,
     country: null,
+    emptyWeight: specs.emptyWeight,
+    maxTakeoffWeight: specs.maxTakeoffWeight,
+    fuelCapacity: specs.fuelCapacity,
+    fuelType: specs.fuelType,
+    cruiseSpeed: specs.cruiseSpeed,
+    maxSpeed: specs.maxSpeed,
+    maxRange: specs.maxRange,
+    serviceCeiling: specs.serviceCeiling,
+    climbRate: specs.climbRate,
+    fuelConsumption: specs.fuelConsumption,
     contactName: contact.name,
     contactEmail: contact.email,
     contactPhone: contact.phone,
@@ -160,6 +170,16 @@ interface ExtractedSpecs {
   serialNumber: string | null;
   airworthy: boolean | null;
   avionicsText: string | null;
+  emptyWeight: number | null;
+  maxTakeoffWeight: number | null;
+  fuelCapacity: number | null;
+  fuelType: string | null;
+  cruiseSpeed: number | null;
+  maxSpeed: number | null;
+  maxRange: number | null;
+  serviceCeiling: number | null;
+  climbRate: number | null;
+  fuelConsumption: number | null;
 }
 
 function extractSpecs(text: string): ExtractedSpecs {
@@ -177,6 +197,16 @@ function extractSpecs(text: string): ExtractedSpecs {
     serialNumber: null,
     airworthy: null,
     avionicsText: null,
+    emptyWeight: null,
+    maxTakeoffWeight: null,
+    fuelCapacity: null,
+    fuelType: null,
+    cruiseSpeed: null,
+    maxSpeed: null,
+    maxRange: null,
+    serviceCeiling: null,
+    climbRate: null,
+    fuelConsumption: null,
   };
 
   // Baujahr (year of manufacture)
@@ -251,6 +281,47 @@ function extractSpecs(text: string): ExtractedSpecs {
     }
   }
   if (avLines.length > 0) specs.avionicsText = avLines.join('; ');
+
+  // Empty weight / Leergewicht / Leermasse
+  const ewMatch = text.match(/(?:Leergewicht|Leermasse|Leer(?:gewicht)?)[:\s]*([\d.,]+)\s*kg/i);
+  if (ewMatch) specs.emptyWeight = extractNumber(ewMatch[1]);
+
+  // Max takeoff weight (alternative to MTOW keyword)
+  const mtowAltMatch = text.match(/(?:MTOW|Abflugmasse|Abfluggewicht|max\.?\s*Abfluggewicht|MAUW)[:\s]*([\d.,]+)\s*kg/i);
+  if (mtowAltMatch) specs.maxTakeoffWeight = extractNumber(mtowAltMatch[1]);
+
+  // Fuel capacity / Tankinhalt
+  const fuelCapMatch = text.match(/(?:Tankinhalt|Kraftstoffmenge|Tankvolumen|Tank)[:\s]*([\d.,]+)\s*[lL]/i);
+  if (fuelCapMatch) specs.fuelCapacity = extractNumber(fuelCapMatch[1]);
+
+  // Fuel type
+  if (/MOGAS|Normalbenzin|Super(?!flug)/i.test(text)) specs.fuelType = "MOGAS";
+  else if (/AVGAS|100LL|Aviation\s*Gasoline/i.test(text)) specs.fuelType = "AVGAS";
+  else if (/Jet.?A|Kerosin|Diesel|JET/i.test(text)) specs.fuelType = "Jet-A";
+
+  // Cruise speed / Reisegeschwindigkeit
+  const cruiseMatch = text.match(/(?:Reisegeschwindigkeit|Reise(?:geschw\.?)?|Vcr|Vc)[:\s]*([\d.,]+)\s*(?:km\/h|kts?|mph)/i);
+  if (cruiseMatch) specs.cruiseSpeed = extractNumber(cruiseMatch[1]);
+
+  // Max speed / Höchstgeschwindigkeit / Vne
+  const maxSpdMatch = text.match(/(?:Höchstgeschwindigkeit|Vne|Vmax|max\.?\s*Geschwindigkeit)[:\s]*([\d.,]+)\s*(?:km\/h|kts?|mph)/i);
+  if (maxSpdMatch) specs.maxSpeed = extractNumber(maxSpdMatch[1]);
+
+  // Range / Reichweite
+  const rangeMatch = text.match(/(?:Reichweite|Aktionsradius|Range)[:\s]*([\d.,]+)\s*(?:km|nm|mi)/i);
+  if (rangeMatch) specs.maxRange = extractNumber(rangeMatch[1]);
+
+  // Service ceiling / Gipfelhöhe / Dienstgipfelhöhe
+  const ceilMatch = text.match(/(?:Gipfelhöhe|Dienstgipfelhöhe|Betriebshöhe|Service\s*Ceiling)[:\s]*([\d.,]+)\s*(?:m|ft)/i);
+  if (ceilMatch) specs.serviceCeiling = extractNumber(ceilMatch[1]);
+
+  // Climb rate / Steigleistung
+  const climbMatch = text.match(/(?:Steigleistung|Steigrate|Climb\s*Rate)[:\s]*([\d.,]+)\s*(?:m\/s|ft\/min|fpm)/i);
+  if (climbMatch) specs.climbRate = extractNumber(climbMatch[1]);
+
+  // Fuel consumption / Verbrauch
+  const consumptionMatch = text.match(/(?:Verbrauch|Kraftstoffverbrauch|Consumption)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h|gal\/h)/i);
+  if (consumptionMatch) specs.fuelConsumption = extractNumber(consumptionMatch[1]);
 
   return specs;
 }

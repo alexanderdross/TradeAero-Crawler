@@ -224,6 +224,16 @@ function parseListingBlock(
     airworthy: airworthy24,
     avionicsText: null,
     country: null,
+    emptyWeight: null,
+    maxTakeoffWeight: null,
+    fuelCapacity: null,
+    fuelType: null,
+    cruiseSpeed: null,
+    maxSpeed: null,
+    maxRange: null,
+    serviceCeiling: null,
+    climbRate: null,
+    fuelConsumption: null,
   };
 }
 
