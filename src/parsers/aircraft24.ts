@@ -226,6 +226,11 @@ function parseListingBlock(
   if (/nicht\s*(?:luft|verkehrs)tüchtig|not\s+airworthy/i.test(text)) airworthy24 = false;
   else if (/(?:luft|verkehrs)tüchtig|airworthy|LTB\s+vorhanden/i.test(text)) airworthy24 = true;
 
+  // Extract manufacturer hint from the URL path segment
+  // e.g. /singleprop/diamond/da40-ng--xm12345.htm → "diamond"
+  const urlSegments = new URL(pageUrl, "https://www.aircraft24.de").pathname.split("/").filter(Boolean);
+  const manufacturerHint = urlSegments.length >= 2 ? urlSegments[1].replace(/-/g, " ").trim() : undefined;
+
   return {
     sourceId: detailUrl ? `${sourceName}:${detailUrl}` : sourceId,
     sourceUrl: pageUrl,
@@ -267,6 +272,7 @@ function parseListingBlock(
     serviceCeiling: null,
     climbRate: null,
     fuelConsumption: null,
+    manufacturerHint,
   };
 }
 
