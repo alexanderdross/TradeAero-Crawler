@@ -301,7 +301,9 @@ export function parseAeromarktAircraftDetail(
   existing: ParsedAircraftListing
 ): ParsedAircraftListing {
   const $ = cheerio.load(html);
-  const text = $("body").text().replace(/\s+/g, " ");
+  // Scope text extraction to the main content area only — avoids bleeding from sidebar/related listings
+  const mainContent = $("main, .cms-page, .container--main, #content, article").first();
+  const text = (mainContent.length ? mainContent : $("body")).text().replace(/\s+/g, " ");
 
   const parseNum = (s: string) => {
     const n = parseFloat(s.replace(/\./g, "").replace(",", "."));
@@ -459,15 +461,37 @@ export function parseAeromarktAircraftDetail(
   const consumMatch = text.match(/(?:Verbrauch|Kraftstoffverbrauch)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h)/i);
   if (consumMatch) fuelConsumption = parseNum(consumMatch[1]);
 
-  // Images from detail page (may have more than index page)
+  // Images — scoped to the main product gallery only to avoid sidebar/related-listing pollution.
+  // Shopware 6 renders "similar listings" carousels with images from other aircraft on the same page.
+  // We only want images from the primary gallery element, not from navigation or recommendations.
   const detailImages: string[] = [];
-  $("img").each((_, el) => {
-    const src = $(el).attr("src") ?? $(el).attr("data-src");
-    if (src && !src.includes("logo") && !src.includes("icon") && !src.includes("no_image") && !src.includes("banner")) {
-      const abs = src.startsWith("http") ? src : `https://www.aeromarkt.net${src.startsWith("/") ? "" : "/"}${src}`;
-      detailImages.push(abs);
-    }
-  });
+  const galleryRoot = $(
+    ".product-image-gallery, .cms-element-product-detail-gallery, .gallery-slider, " +
+    ".product-detail__media, .product-media-gallery, main .gallery, " +
+    ".cms-element-image-gallery, .cms-block-gallery, .product-images"
+  );
+  // Only use gallery-scoped images if we found the gallery container
+  const imgScope = galleryRoot.length ? galleryRoot : null;
+  if (imgScope) {
+    imgScope.find("img").each((_, el) => {
+      // Only use src (not data-src — lazy-loaded sidebar images use data-src)
+      const src = $(el).attr("src");
+      if (
+        src &&
+        !src.includes("logo") &&
+        !src.includes("icon") &&
+        !src.includes("no_image") &&
+        !src.includes("banner") &&
+        !src.includes("placeholder")
+      ) {
+        const abs = src.startsWith("http") ? src : `https://www.aeromarkt.net${src.startsWith("/") ? "" : "/"}${src}`;
+        detailImages.push(abs);
+      }
+    });
+  }
+  // Use detail images only if the gallery was found AND has images;
+  // otherwise keep index-page thumbnails (which are reliably scoped per-listing)
+  const finalImages = detailImages.length > 0 ? detailImages : existing.imageUrls;
 
   return {
     ...existing,
@@ -495,6 +519,6 @@ export function parseAeromarktAircraftDetail(
     serviceCeiling: serviceCeiling ?? existing.serviceCeiling,
     climbRate: climbRate ?? existing.climbRate,
     fuelConsumption: fuelConsumption ?? existing.fuelConsumption,
-    imageUrls: detailImages.length > existing.imageUrls.length ? detailImages : existing.imageUrls,
+    imageUrls: finalImages,
   };
 }
