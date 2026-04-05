@@ -291,8 +291,79 @@ export function parseAeromarktPartsPage(
 }
 
 /**
+ * Extract accordion / collapsible sections from an aeromarkt detail page.
+ * Tries Bootstrap 5 accordion (Shopware 6 default), then falls back to
+ * heading-based detection. Returns a Map of lowercase section name → content text.
+ *
+ * Accordion sections found on aeromarkt listings:
+ *   "Exterior"            — equipment/avionics items
+ *   "Avionik & Instrumente" — avionics breakdown
+ *   "Interior"            — cabin/seating description
+ *   "Sonstige Informationen" — main description + specs (TTAF, engine, etc.)
+ */
+function extractAccordionSections(
+  $: cheerio.CheerioAPI,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root: cheerio.Cheerio<any>
+): Map<string, string> {
+  const sections = new Map<string, string>();
+
+  // Strategy 1: Bootstrap 5 / Shopware 6 accordion (.accordion-item)
+  root.find(".accordion-item").each((_, el) => {
+    const header = $(el)
+      .find(".accordion-button, .accordion-header button, .accordion-header h3, .accordion-header h4, .accordion-header .h5")
+      .first()
+      .text()
+      .trim();
+    const body = $(el)
+      .find(".accordion-body, .accordion-collapse")
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (header && body.length > 5) {
+      sections.set(header.toLowerCase(), body);
+    }
+  });
+
+  if (sections.size > 0) return sections;
+
+  // Strategy 2: data-bs-toggle/data-toggle collapse pattern
+  root.find("[data-bs-toggle='collapse'], [data-toggle='collapse']").each((_, el) => {
+    const header = $(el).text().trim();
+    const targetSel = $(el).attr("data-bs-target") ?? $(el).attr("href") ?? "";
+    if (!header || !targetSel.startsWith("#")) return;
+    const body = root.find(targetSel).text().replace(/\s+/g, " ").trim();
+    if (body.length > 5) sections.set(header.toLowerCase(), body);
+  });
+
+  if (sections.size > 0) return sections;
+
+  // Strategy 3: HTML5 <details>/<summary>
+  root.find("details").each((_, el) => {
+    const header = $(el).find("summary").first().text().trim();
+    const body = $(el).clone().find("summary").remove().end().text().replace(/\s+/g, " ").trim();
+    if (header && body.length > 5) sections.set(header.toLowerCase(), body);
+  });
+
+  if (sections.size > 0) return sections;
+
+  // Strategy 4: generic card-header / panel-heading followed by sibling content
+  root.find(".card-header, .panel-heading, .collapsible-header").each((_, el) => {
+    const header = $(el).text().trim();
+    const body = $(el).next(".card-body, .panel-body, .collapsible-body, .collapse")
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (header && body.length > 5) sections.set(header.toLowerCase(), body);
+  });
+
+  return sections;
+}
+
+/**
  * Parse a single aeromarkt.net aircraft detail page.
- * Returns enriched fields: TTAF, engine hours, cycles, annual inspection, location, engine.
+ * Extracts structured data from accordion sections (Exterior, Avionik & Instrumente,
+ * Interior, Sonstige Informationen) plus regex fallbacks for all spec fields.
  * Merges into an existing ParsedAircraftListing (partial update pattern).
  */
 export function parseAeromarktAircraftDetail(
@@ -301,39 +372,121 @@ export function parseAeromarktAircraftDetail(
   existing: ParsedAircraftListing
 ): ParsedAircraftListing {
   const $ = cheerio.load(html);
-  // Scope text extraction to the main content area only — avoids bleeding from sidebar/related listings
+  // Scope to main content area — avoids bleeding from sidebar/related listings
   const mainContent = $("main, .cms-page, .container--main, #content, article").first();
-  const text = (mainContent.length ? mainContent : $("body")).text().replace(/\s+/g, " ");
+  const root = mainContent.length ? mainContent : $("body");
+  const text = root.text().replace(/\s+/g, " ");
+
+  // ── Extract named accordion sections ──────────────────────────────────────
+  const sections = extractAccordionSections($, root);
+
+  // Section aliases (German/English variants seen on aeromarkt)
+  const exteriorText   = sections.get("exterior") ?? sections.get("außen") ?? sections.get("aussenbereich") ?? "";
+  const avionikText    = sections.get("avionik & instrumente") ?? sections.get("avionik") ?? sections.get("instruments") ?? "";
+  const interiorText   = sections.get("interior") ?? sections.get("innen") ?? sections.get("innenausstattung") ?? "";
+  const sonstigeText   = sections.get("sonstige informationen") ?? sections.get("sonstige") ?? sections.get("additional information") ?? "";
+
+  // Prefer the accordion "Sonstige Informationen" content as the primary spec-scan target,
+  // falling back to the full page text if the section wasn't found.
+  const specText = sonstigeText.length > 50 ? sonstigeText : text;
 
   const parseNum = (s: string) => {
     const n = parseFloat(s.replace(/\./g, "").replace(",", "."));
     return isNaN(n) ? null : n;
   };
 
-  // TTAF / Betriebsstunden
+  // ── Description ───────────────────────────────────────────────────────────
+  // Use accordion "Sonstige Informationen" content as the real description when available.
+  // It contains the seller's free-text description of the aircraft (damage history, hangared,
+  // engine details, etc.) which is far more useful than the generated placeholder.
+  let description = existing.description;
+  if (sonstigeText.length > 50) {
+    // Prepend interior details if available
+    const combinedDesc = interiorText.length > 20
+      ? `${sonstigeText} Interior: ${interiorText}`
+      : sonstigeText;
+    // Only update if the new content is substantially richer than what we have
+    if (combinedDesc.length > (description?.length ?? 0)) {
+      description = combinedDesc;
+    }
+  } else if (interiorText.length > 20 && !description?.includes(interiorText.slice(0, 30))) {
+    description = description ? `${description} ${interiorText}` : interiorText;
+  }
+
+  // ── Avionics — accordion-aware extraction ──────────────────────────────
+  // "Exterior" accordion contains the full equipment list on aeromarkt.
+  // "Avionik & Instrumente" has the same or a subset, organized by type.
+  // We merge both so the classifier in db/aircraft.ts has maximum signal.
+  let avionicsText = existing.avionicsText;
+  const avionicsSections = [exteriorText, avionikText].filter(s => s.length > 10);
+  if (avionicsSections.length > 0) {
+    // Split each section into individual item lines and deduplicate
+    const seenItems = new Set<string>();
+    const avItems: string[] = [];
+    for (const section of avionicsSections) {
+      // Items are separated by sentence boundaries or newline markers in the collapsed text
+      for (const item of section.split(/(?<=[a-zA-Z0-9])\s{2,}|[•·\-]\s*/)) {
+        const s = item.trim();
+        if (s.length > 3 && s.length < 300 && !seenItems.has(s.toLowerCase())) {
+          seenItems.add(s.toLowerCase());
+          avItems.push(s);
+        }
+      }
+    }
+    if (avItems.length > 0) avionicsText = avItems.join("; ");
+  }
+  // Fallback: keyword scan on full page text (original logic)
+  if (!avionicsText || avionicsText === existing.avionicsText) {
+    const AVIONICS_KW = ['GPS', 'Transponder', 'Funk', 'VOR', 'ILS', 'ADS-B', 'FLARM',
+      'Autopilot', 'Garmin', 'Dynon', 'Becker', 'Trig', 'Bendix', 'King',
+      'SkyDemon', 'SkyView', 'XPNDR', 'Mode-S', 'Mode-C', 'TCAS', 'Stormscope'];
+    const avAeroLines: string[] = [];
+    for (const seg of text.split(/[•\n]/)) {
+      const s = seg.trim();
+      if (s.length > 2 && s.length < 200 && AVIONICS_KW.some(k => s.includes(k))) {
+        avAeroLines.push(s);
+      }
+    }
+    if (avAeroLines.length > 0) avionicsText = avAeroLines.join('; ');
+  }
+
+  // ── Spec fields — prefer scoped specText (Sonstige Informationen), fall back to full text ──
+
+  // TTAF / Betriebsstunden / Total Time
   let totalTime = existing.totalTime;
-  const ttMatch = text.match(/(?:Betriebsstunden|TTAF|TT(?:AF)?|Flugstunden)[:\s]*([\d.,]+)/i);
+  const ttMatch = specText.match(/(?:Total\s*Time|Betriebsstunden|TTAF|TT(?:AF)?|Flugstunden|time\s+state\s+Airframe)[:\s]*([\d.,]+)/i)
+    ?? text.match(/(?:Total\s*Time|Betriebsstunden|TTAF|TT(?:AF)?|Flugstunden)[:\s]*([\d.,]+)/i);
   if (ttMatch) totalTime = parseNum(ttMatch[1]);
 
   // Engine hours / Motorstunden
   let engineHours = existing.engineHours;
-  const ehMatch = text.match(/(?:Motorstunden|TTSN|TTE|Motorbetriebs)[:\s]*([\d.,]+)/i);
+  const ehMatch = specText.match(/TT[:\s]*([\d.,]+)\s*hours?/i)
+    ?? specText.match(/(?:Motorstunden|TTSN|TTE|Motorbetriebs|Engine\s+Hours)[:\s]*([\d.,]+)/i)
+    ?? text.match(/(?:Motorstunden|TTSN|TTE|Motorbetriebs)[:\s]*([\d.,]+)/i);
   if (ehMatch) engineHours = parseNum(ehMatch[1]);
 
   // Cycles / Landungen
   let cycles = existing.cycles;
-  const cyclesMatch = text.match(/(?:Landungen|LDG|Ldg\.?|Zyklen)[:\s]*([\d.,]+)/i);
+  const cyclesMatch = specText.match(/(?:Landungen|LDG|Ldg\.?|Zyklen|Landings)[:\s]*([\d.,]+)/i)
+    ?? text.match(/(?:Landungen|LDG|Ldg\.?|Zyklen)[:\s]*([\d.,]+)/i);
   if (cyclesMatch) cycles = parseInt(cyclesMatch[1].replace(/\./g, ""), 10) || null;
 
-  // Annual inspection — Jahresnachprüfung, JNP, TP, HU
+  // Annual inspection — Jahresnachprüfung, JNP, TP, HU, Annual
   let annualInspection = existing.annualInspection;
-  const annualMatch = text.match(/(?:Jahresnachpr[üu]fung|JNP|TP|HU)[:\s]*([\d./]+(?:\s*\d{2,4})?)/i);
+  const annualMatch = specText.match(/(?:Jahresnachpr[üu]fung|JNP|Annual\s+Inspection|TP|HU)[:\s]*([\w\s./]+?\d{4})/i)
+    ?? text.match(/(?:Jahresnachpr[üu]fung|JNP|TP|HU)[:\s]*([\d./]+(?:\s*\d{2,4})?)/i);
   if (annualMatch) annualInspection = annualMatch[1].trim();
 
-  // Engine description
+  // Engine description — prefer "Engines:" block in Sonstige Informationen
   let engine = existing.engine;
-  const engineDescMatch = text.match(/(?:Triebwerk|Motortyp|Motor)[:\s]*([^;\n,.]{5,60})/i);
-  if (engineDescMatch) engine = engineDescMatch[1].trim();
+  const engineBlockMatch = specText.match(/Engines?[:\s]*\n?\s*([^\n;]{5,80})/i);
+  if (engineBlockMatch) {
+    engine = engineBlockMatch[1].trim();
+  } else {
+    const engineDescMatch = specText.match(/(?:Triebwerk|Motortyp|Motor)[:\s]*([^;\n,.]{5,60})/i)
+      ?? text.match(/(?:Triebwerk|Motortyp)\s*:\s*([^;\n,.]{5,60})/i);
+    if (engineDescMatch) engine = engineDescMatch[1].trim();
+  }
 
   // Registration / Kennzeichen
   let registration = existing.registration;
@@ -341,29 +494,16 @@ export function parseAeromarktAircraftDetail(
     ?? text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
   if (regAeroMatch) registration = regAeroMatch[1];
 
-  // Serial number / Werk-Nr.
+  // Serial number / Werk-Nr. / S/N
   let serialNumber = existing.serialNumber;
-  const serialAeroMatch = text.match(/(?:Werk[- ]?Nr\.?|S\/N|Seriennummer)[:\s]*([A-Z0-9][\w-]{1,20})/i);
+  const serialAeroMatch = specText.match(/(?:Werk[- ]?Nr\.?|S\/N|Seriennummer|Serial\s*Number)[:\s]*([A-Z0-9][\w-]{1,20})/i)
+    ?? text.match(/(?:Werk[- ]?Nr\.?|S\/N|Seriennummer)[:\s]*([A-Z0-9][\w-]{1,20})/i);
   if (serialAeroMatch) serialNumber = serialAeroMatch[1].trim();
 
   // Airworthy
   let airworthy = existing.airworthy;
   if (/nicht\s*(?:luft|verkehrs)tüchtig/i.test(text)) airworthy = false;
   else if (/(?:luft|verkehrs)tüchtig(?!\s*zeugnis)|LTB\s+vorhanden|airworthy/i.test(text)) airworthy = true;
-
-  // Avionics free text
-  let avionicsText = existing.avionicsText;
-  const AVIONICS_KW = ['GPS', 'Transponder', 'Funk', 'VOR', 'ILS', 'ADS-B', 'FLARM',
-    'Autopilot', 'Garmin', 'Dynon', 'Becker', 'Trig', 'Bendix', 'King',
-    'SkyDemon', 'SkyView', 'XPNDR', 'Mode-S', 'Mode-C', 'TCAS'];
-  const avAeroLines: string[] = [];
-  for (const seg of text.split(/[•\n]/)) {
-    const s = seg.trim();
-    if (s.length > 2 && s.length < 200 && AVIONICS_KW.some(k => s.includes(k))) {
-      avAeroLines.push(s);
-    }
-  }
-  if (avAeroLines.length > 0) avionicsText = avAeroLines.join('; ');
 
   // Country from ICAO prefix
   let country = existing.country;
@@ -412,17 +552,20 @@ export function parseAeromarktAircraftDetail(
 
   // Empty weight / Leergewicht
   let emptyWeight = existing.emptyWeight;
-  const ewMatch = text.match(/(?:Leergewicht|Leermasse)[:\s]*([\d.,]+)\s*kg/i);
+  const ewMatch = specText.match(/(?:Leergewicht|Leermasse|Empty\s+Weight)[:\s]*([\d.,]+)\s*(?:kg|lbs?)/i)
+    ?? text.match(/(?:Leergewicht|Leermasse)[:\s]*([\d.,]+)\s*kg/i);
   if (ewMatch) emptyWeight = parseNum(ewMatch[1]);
 
   // Max takeoff weight / MTOW
   let maxTakeoffWeight = existing.maxTakeoffWeight;
-  const mtowMatch = text.match(/(?:MTOW|Abflugmasse|Abfluggewicht|MAUW)[:\s]*([\d.,]+)\s*kg/i);
+  const mtowMatch = specText.match(/(?:MTOW|Abflugmasse|Abfluggewicht|MAUW|Max.*Takeoff)[:\s]*([\d.,]+)\s*(?:kg|lbs?)/i)
+    ?? text.match(/(?:MTOW|Abflugmasse|Abfluggewicht|MAUW)[:\s]*([\d.,]+)\s*kg/i);
   if (mtowMatch) maxTakeoffWeight = parseNum(mtowMatch[1]);
 
   // Fuel capacity / Tankinhalt
   let fuelCapacity = existing.fuelCapacity;
-  const fuelCapMatch = text.match(/(?:Tankinhalt|Kraftstoffmenge|Tank)[:\s]*([\d.,]+)\s*[lL]/i);
+  const fuelCapMatch = specText.match(/(?:Tankinhalt|Kraftstoffmenge|Tank\s+capacity|Fuel\s+Capacity)[:\s]*([\d.,]+)\s*(?:[lLgal])/i)
+    ?? text.match(/(?:Tankinhalt|Kraftstoffmenge|Tank)[:\s]*([\d.,]+)\s*[lL]/i);
   if (fuelCapMatch) fuelCapacity = parseNum(fuelCapMatch[1]);
 
   // Fuel type
@@ -431,34 +574,41 @@ export function parseAeromarktAircraftDetail(
   else if (/AVGAS|100LL/i.test(text)) fuelType = "AVGAS";
   else if (/Jet.?A|Kerosin|Diesel/i.test(text)) fuelType = "Jet-A";
 
-  // Cruise speed / Reisegeschwindigkeit
+  // Cruise speed / Reisegeschwindigkeit / Cruise at X Knots
   let cruiseSpeed = existing.cruiseSpeed;
-  const cruiseMatch = text.match(/(?:Reisegeschwindigkeit|Reise(?:geschw\.?)?|Vcr)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
+  const cruiseMatch = specText.match(/[Cc]ruise\s+at\s+([\d.,]+)\s*[Kk]nots?/i)
+    ?? specText.match(/(?:Reisegeschwindigkeit|Reise(?:geschw\.?)?|Vcr)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i)
+    ?? text.match(/(?:Reisegeschwindigkeit|Reise(?:geschw\.?)?|Vcr)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
   if (cruiseMatch) cruiseSpeed = parseNum(cruiseMatch[1]);
 
   // Max speed / Vne / Höchstgeschwindigkeit
   let maxSpeed = existing.maxSpeed;
-  const maxSpdMatch = text.match(/(?:Höchstgeschwindigkeit|Vne|Vmax)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
+  const maxSpdMatch = specText.match(/(?:Höchstgeschwindigkeit|Vne|Vmax|Max.*[Ss]peed)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i)
+    ?? text.match(/(?:Höchstgeschwindigkeit|Vne|Vmax)[:\s]*([\d.,]+)\s*(?:km\/h|kts?)/i);
   if (maxSpdMatch) maxSpeed = parseNum(maxSpdMatch[1]);
 
   // Range / Reichweite
   let maxRange = existing.maxRange;
-  const rangeMatch = text.match(/(?:Reichweite|Range)[:\s]*([\d.,]+)\s*(?:km|nm)/i);
+  const rangeMatch = specText.match(/(?:Reichweite|Range)[:\s]*([\d.,]+)\s*(?:km|nm|NM)/i)
+    ?? text.match(/(?:Reichweite|Range)[:\s]*([\d.,]+)\s*(?:km|nm)/i);
   if (rangeMatch) maxRange = parseNum(rangeMatch[1]);
 
   // Service ceiling / Gipfelhöhe
   let serviceCeiling = existing.serviceCeiling;
-  const ceilMatch = text.match(/(?:Gipfelhöhe|Dienstgipfelhöhe|Betriebshöhe)[:\s]*([\d.,]+)\s*(?:m|ft)/i);
+  const ceilMatch = specText.match(/(?:Gipfelhöhe|Dienstgipfelhöhe|Betriebshöhe|Service\s+Ceiling)[:\s]*([\d.,]+)\s*(?:m|ft)/i)
+    ?? text.match(/(?:Gipfelhöhe|Dienstgipfelhöhe|Betriebshöhe)[:\s]*([\d.,]+)\s*(?:m|ft)/i);
   if (ceilMatch) serviceCeiling = parseNum(ceilMatch[1]);
 
   // Climb rate / Steigleistung
   let climbRate = existing.climbRate;
-  const climbMatch = text.match(/(?:Steigleistung|Steigrate)[:\s]*([\d.,]+)\s*(?:m\/s|ft\/min)/i);
+  const climbMatch = specText.match(/(?:Steigleistung|Steigrate|Climb\s+Rate)[:\s]*([\d.,]+)\s*(?:m\/s|ft\/min|fpm)/i)
+    ?? text.match(/(?:Steigleistung|Steigrate)[:\s]*([\d.,]+)\s*(?:m\/s|ft\/min)/i);
   if (climbMatch) climbRate = parseNum(climbMatch[1]);
 
   // Fuel consumption / Verbrauch
   let fuelConsumption = existing.fuelConsumption;
-  const consumMatch = text.match(/(?:Verbrauch|Kraftstoffverbrauch)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h)/i);
+  const consumMatch = specText.match(/(?:Verbrauch|Kraftstoffverbrauch|Fuel\s+Consumption)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h|gal\/h)/i)
+    ?? text.match(/(?:Verbrauch|Kraftstoffverbrauch)[:\s]*([\d.,]+)\s*(?:L\/h|l\/h|ltr\/h)/i);
   if (consumMatch) fuelConsumption = parseNum(consumMatch[1]);
 
   // Images — scoped to the main product gallery only to avoid sidebar/related-listing pollution.
@@ -496,6 +646,7 @@ export function parseAeromarktAircraftDetail(
   return {
     ...existing,
     sourceUrl: pageUrl,
+    description: description ?? existing.description,
     totalTime: totalTime ?? existing.totalTime,
     engineHours: engineHours ?? existing.engineHours,
     cycles: cycles ?? existing.cycles,
