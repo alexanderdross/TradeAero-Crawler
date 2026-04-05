@@ -559,7 +559,9 @@ export async function upsertAircraftListing(
   }
 
   // ── INSERT PATH (full pipeline: images + translation + enrichment) ──
-  const images = await uploadImages(listing.imageUrls, listing.title);
+  // Cap at 10 images — matches premium plan limit; avoids gallery bloat from scraped pages
+  const MAX_CRAWLED_IMAGES = 10;
+  const images = await uploadImages(listing.imageUrls.slice(0, MAX_CRAWLED_IMAGES), listing.title);
   const translations = await translateListing(listing.title, listing.description, "de");
 
   let record = await mapToAircraftRow(listing, systemUserId, images, translations, manufacturer);
