@@ -145,13 +145,32 @@ async function resolveManufacturer(title: string, hint?: string): Promise<Manufa
   }
 
   // 3. Fallback known-manufacturer list — common UL/niche names not yet in reference_specs
-  // Sorted longest-first already; normalize search text to remove dots for "ICP" vs "I.C.P"
+  // Three match strategies (all case-insensitive, longest name wins):
+  //   a) Exact substring (normalized)
+  //   b) Dot-stripped substring — "I.C.P" matches "icp"
+  //   c) Space-stripped substring — "FK131" matches "FK 131"
+  //   d) Word-set match — all significant words present in any order
+  //      e.g. "TL Ultralight" matches "Schöne Ultralight TL 96 Sting"
   const searchNorm = normalizeMfg(searchText);
   const searchNoDots = searchNorm.replace(/\./g, "");
+  const searchNoSpaces = searchNorm.replace(/[\s.]/g, "");
   for (const name of FALLBACK_MANUFACTURERS) {
     const nameLower = normalizeMfg(name);
     const nameNoDots = nameLower.replace(/\./g, "");
-    if (nameLower.length >= 3 && (searchNorm.includes(nameLower) || searchNoDots.includes(nameNoDots))) {
+    const nameNoSpaces = nameLower.replace(/[\s.]/g, "");
+    // a) exact normalized substring
+    const matchA = nameLower.length >= 3 && searchNorm.includes(nameLower);
+    // b) dot-stripped
+    const matchB = nameNoDots.length >= 3 && searchNoDots.includes(nameNoDots);
+    // c) space-stripped (handles "FK131" matching "FK 131")
+    const matchC = nameNoSpaces.length >= 3 && searchNoSpaces.includes(nameNoSpaces);
+    // d) word-set: every significant word (≥2 chars) in name appears as a whole word in text
+    const mfgWords = nameLower.split(/\s+/).filter(w => w.length >= 2);
+    const matchD = mfgWords.length >= 2 && mfgWords.every(w => {
+      const esc = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`\\b${esc}\\b`).test(searchNorm);
+    });
+    if (matchA || matchB || matchC || matchD) {
       const id = await createManufacturer(name);
       logger.info("Resolved manufacturer from fallback list", { name, title: title.slice(0, 60) });
       return { id, name, confidence: "medium" };
@@ -167,7 +186,40 @@ async function resolveManufacturer(title: string, hint?: string): Promise<Manufa
     return { id, name: properHint, confidence: "medium" };
   }
 
-  // 4. No match → "Other" (listing saved as draft for admin review)
+  // 5. Strip common German sale prefixes and retry manufacturer detection from the remainder.
+  // Helmut listings often start with "Schöne", "Verkaufe", "Hallo, wir verkaufen unsere CT-SW"
+  // which prevents matching the actual manufacturer name in the middle of the title.
+  const SALE_PREFIXES = /^(?:sehr\s+)?(?:schöne?r?s?\s+|gut(?:e[rs]?)?\s+|wunderschöne?\s+|gepflegte?r?\s+|einwandfreie?r?\s+|hallo[\s,]+(?:ich\s+)?(?:wir\s+)?(?:verkaufe[n]?\s+(?:unsere?n?\s+)?)?|(?:zu\s+)?verkaufe[n]?\s+(?:wird\s+)?(?:unsere?n?\s+)?|wegen\s+\S+\s+|aufgrund\s+\S+\s+|privatverkauf\s+|biete\s+(?:an\s+)?|abzugeben[\s:]+)/i;
+  const titleStripped = normalizeMfg(title.replace(SALE_PREFIXES, "")).trim();
+  if (titleStripped && titleStripped !== normalizeMfg(title)) {
+    // Re-run tier 1 (DB) with stripped title
+    for (const [nameLower2, id2] of [...(await getManufacturerMap()).entries()].sort((a, b) => b[0].length - a[0].length)) {
+      if (nameLower2.length >= 3 && titleStripped.includes(nameLower2)) {
+        return { id: id2, name: nameLower2, confidence: "high" };
+      }
+    }
+    // Re-run tier 3 (FALLBACK) with stripped title
+    const sNorm = titleStripped;
+    const sNoDots = sNorm.replace(/\./g, "");
+    const sNoSpaces = sNorm.replace(/[\s.]/g, "");
+    for (const name of FALLBACK_MANUFACTURERS) {
+      const nLower = normalizeMfg(name);
+      const nNoDots = nLower.replace(/\./g, "");
+      const nNoSpaces = nLower.replace(/[\s.]/g, "");
+      const mWords = nLower.split(/\s+/).filter(w => w.length >= 2);
+      const mA = nLower.length >= 3 && sNorm.includes(nLower);
+      const mB = nNoDots.length >= 3 && sNoDots.includes(nNoDots);
+      const mC = nNoSpaces.length >= 3 && sNoSpaces.includes(nNoSpaces);
+      const mD = mWords.length >= 2 && mWords.every(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(sNorm));
+      if (mA || mB || mC || mD) {
+        const id = await createManufacturer(name);
+        logger.info("Resolved manufacturer from fallback (stripped prefix)", { name, title: title.slice(0, 60) });
+        return { id, name, confidence: "medium" };
+      }
+    }
+  }
+
+  // No match → listing saved as draft for admin review
   const id = await createManufacturer("Other");
   logger.warn("Could not resolve manufacturer — listing saved as draft", { title: title.slice(0, 80) });
   return { id, name: "Other", confidence: "low" };
