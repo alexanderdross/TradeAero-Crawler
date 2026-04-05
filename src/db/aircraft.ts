@@ -1362,7 +1362,10 @@ function classifyAvionicsText(raw: string | null): {
   const empty = { avionics_gps: null, avionics_autopilot: null, avionics_radios: null, avionics_transponder: null, avionics_tcas: null, avionics_other: null, has_glass_cockpit: false };
   if (!raw) return empty;
 
-  const segments = raw.split(/[;]+/).map((s) => s.trim()).filter((s) => s.length > 2);
+  // Split on semicolons AND commas — Helmut listings use comma-separated avionics text;
+  // without comma splitting the entire description lands in one segment and matches the
+  // first keyword found (e.g. "Transponder"), dumping unrelated text into that column.
+  const segments = raw.split(/[;,]+/).map((s) => s.trim()).filter((s) => s.length > 2);
   const gps: string[] = [], ap: string[] = [], radio: string[] = [], xpdr: string[] = [], tcas: string[] = [], other: string[] = [];
 
   const GPS_KW   = ['GPS', 'GNSS', 'Garmin', 'Dynon', 'SkyDemon', 'SkyView', 'EFIS', 'Glass Cockpit', 'G430', 'G500', 'G600', 'GTN', 'GNS', 'Moving Map', 'MFD', 'PFD', 'Navigat', 'Navi', 'Avmap', 'Naviter'];
