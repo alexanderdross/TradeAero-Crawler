@@ -88,8 +88,12 @@ export function parseAircraft24ModelPage(
     if (text === "Weiter" || text === "»") {
       const href = $(el).attr("href");
       if (href) {
-        const base = new URL(pageUrl).origin;
-        nextPageUrl = href.startsWith("http") ? href : `${base}${href.startsWith("/") ? "" : "/"}${href}`;
+        // Use URL resolution to preserve the subdirectory path.
+        // e.g. pageUrl = "/singleprop/cessna/172--xm10033.htm"
+        //       href   = "172--xm10033--xo2.htm" (relative, no leading /)
+        // → resolves to "/singleprop/cessna/172--xm10033--xo2.htm" ✓
+        // Previously used `origin + href` which stripped the path, giving a 404.
+        nextPageUrl = new URL(href, pageUrl).href;
       }
     }
   });
