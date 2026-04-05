@@ -72,6 +72,17 @@ const FALLBACK_MANUFACTURERS: ReadonlyArray<string> = [
   "ELA Aviacion", "ELA Aviation", "Magni Gyro", "SD Planes",
   "Aeroprakt", "Aeropilot", "Aerospool", "Aeropro",
   "Flysynthesis", "DynAero", "Blackshape",
+  // Classic/vintage German manufacturers
+  "Sportavia Pützer", "Sportavia-Pützer", "Sportavia",
+  "Focke-Wulf", "Focke Wulf",
+  "MBB SIAT", "SIAT",
+  "Bölkow", "Bolkow",
+  "Gardan",
+  // Other GA manufacturers seen on aeromarkt
+  "Morane-Saulnier", "Morane Saulnier",
+  "Robin", "Jodel", "Wassmer", "Fournier", "Mudry", "CAP Aviation",
+  "Rockwell", "Bellanca", "Grumman", "Socata", "Reims", "Valentin",
+  "Laverda", "Aermacchi", "Caproni", "Falco", "Sequoia",
   // Single-word / short names (≥3 chars)
   "Weller", "Gramex", "HIMAX", "Banjo", "Calipso",
   "X-Air", "YUMA", "DOVA", "Ikarus", "Corvus",
