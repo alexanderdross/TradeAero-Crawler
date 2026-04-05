@@ -226,10 +226,23 @@ function parseListingBlock(
   if (/nicht\s*(?:luft|verkehrs)tüchtig|not\s+airworthy/i.test(text)) airworthy24 = false;
   else if (/(?:luft|verkehrs)tüchtig|airworthy|LTB\s+vorhanden/i.test(text)) airworthy24 = true;
 
-  // Extract manufacturer hint from the URL path segment
-  // e.g. /singleprop/diamond/da40-ng--xm12345.htm → "diamond"
+  // Extract manufacturer and category hints from the URL path
+  // e.g. /singleprop/diamond/da40-ng--xm12345.htm → category="Single Engine Piston", mfg="diamond"
   const urlSegments = new URL(pageUrl, "https://www.aircraft24.de").pathname.split("/").filter(Boolean);
   const manufacturerHint = urlSegments.length >= 2 ? urlSegments[1].replace(/-/g, " ").trim() : undefined;
+
+  // Map aircraft24 URL category slugs to DB category names
+  const AIRCRAFT24_CATEGORY_MAP: Record<string, string> = {
+    singleprop:  "Single Engine Piston",
+    multiprop:   "Multi Engine Piston",
+    turboprop:   "Turboprop",
+    jet:         "Jet",
+    helicopter:  "Helicopter / Gyrocopter",
+    ultralight:  "Ultralight / Light Sport Aircraft (LSA)",
+    motorglider: "Glider",
+    glider:      "Glider",
+  };
+  const categoryHint = urlSegments.length >= 1 ? AIRCRAFT24_CATEGORY_MAP[urlSegments[0]] : undefined;
 
   return {
     sourceId: detailUrl ? `${sourceName}:${detailUrl}` : sourceId,
@@ -273,6 +286,7 @@ function parseListingBlock(
     climbRate: null,
     fuelConsumption: null,
     manufacturerHint,
+    categoryHint,
   };
 }
 

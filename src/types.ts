@@ -91,6 +91,12 @@ export interface ParsedAircraftListing {
    * Passed to resolveManufacturer() to improve matching accuracy.
    */
   manufacturerHint?: string;
+  /**
+   * Optional category override from the source URL segment
+   * (e.g. aircraft24 URL: /singleprop/... → "Single Engine Piston").
+   * When present, bypasses keyword-based detectCategoryName() entirely.
+   */
+  categoryHint?: string;
 }
 
 /** Raw parsed parts listing from Helmut's UL Seiten */

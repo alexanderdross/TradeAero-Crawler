@@ -646,7 +646,9 @@ async function mapToAircraftRow(
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
-  const categoryName = detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  // Use URL-based category hint (aircraft24) if available — more reliable than keyword detection
+  const categoryName = listing.categoryHint
+    ?? detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
   const categoryId = await resolveCategoryId(categoryName);
   const seats = detectSeats(listing.title, listing.description);
   const originalUrl = listing.sourceUrl;
