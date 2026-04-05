@@ -53,6 +53,47 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
  */
 type ManufacturerMatch = { id: number; name: string; confidence: "high" | "medium" | "low" };
 
+/**
+ * Tier-3 fallback: known UL/LSA/GA/niche manufacturers frequently found on
+ * Helmut's UL Seiten and other sources, but not yet in aircraft_reference_specs.
+ *
+ * Sorted longest-first so more specific names match before shorter ones.
+ * Confidence: MEDIUM → listing published (not draft).
+ *
+ * Matching: lowercased substring search against the combined search text
+ * (URL hint + title). Dots in names are preserved ("i.c.p" matches "I.C.P").
+ */
+const FALLBACK_MANUFACTURERS: ReadonlyArray<string> = [
+  // Multi-word names first (longest match wins)
+  "Weller Flugzeugbau", "TL Ultralight", "Czech Sport Aircraft",
+  "Comco Ikarus", "Flight Design", "BRM Aero", "Alpi Aviation",
+  "Shark Aero", "Tomark Aero", "JMB Aircraft", "Just Aircraft",
+  "Air Creation", "Quad City", "FK Lightplanes", "AutoGyro GmbH",
+  "ELA Aviacion", "ELA Aviation", "Magni Gyro", "SD Planes",
+  "Aeroprakt", "Aeropilot", "Aerospool", "Aeropro",
+  "Flysynthesis", "DynAero", "Blackshape",
+  // Single-word / short names (≥3 chars)
+  "Weller", "Gramex", "HIMAX", "Banjo", "Calipso",
+  "X-Air", "YUMA", "DOVA", "Ikarus", "Corvus",
+  "Vampire", "Platter", "Kiebitz", "Dallach", "Aquila",
+  "Kolb", "Rans", "Sonex", "Sling", "Breezer",
+  "Evektor", "Remos", "Pioneer", "Roland",
+  "Tecnam", "Pipistrel", "Jabiru",
+  "FK9", "FK12", "FK14", "FK131",
+  // ICP often written "I.C.P" in German listings — include both forms
+  "I.C.P", "ICP",
+  // AutoGyro variants
+  "AutoGyro", "Autogyro",
+  // Additional types used as manufacturer in Helmut titles
+  "Airborne", "Aeros", "Tomark", "Tecnam",
+  "Sirius", "Kitfox",
+];
+
+/** Normalize a string for matching: lowercase, collapse whitespace */
+function normalizeMfg(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 async function resolveManufacturer(title: string, hint?: string): Promise<ManufacturerMatch> {
   const mfgMap = await getManufacturerMap();
   const titleLower = title.replace(/^(?:update\s+)?\d{2}\.\d{2}\.\d{4}\s*/i, "").toLowerCase().trim();
@@ -92,7 +133,21 @@ async function resolveManufacturer(title: string, hint?: string): Promise<Manufa
     }
   }
 
-  // 3. If hint is present, use it as manufacturer name directly (URL slug is reliable)
+  // 3. Fallback known-manufacturer list — common UL/niche names not yet in reference_specs
+  // Sorted longest-first already; normalize search text to remove dots for "ICP" vs "I.C.P"
+  const searchNorm = normalizeMfg(searchText);
+  const searchNoDots = searchNorm.replace(/\./g, "");
+  for (const name of FALLBACK_MANUFACTURERS) {
+    const nameLower = normalizeMfg(name);
+    const nameNoDots = nameLower.replace(/\./g, "");
+    if (nameLower.length >= 3 && (searchNorm.includes(nameLower) || searchNoDots.includes(nameNoDots))) {
+      const id = await createManufacturer(name);
+      logger.info("Resolved manufacturer from fallback list", { name, title: title.slice(0, 60) });
+      return { id, name, confidence: "medium" };
+    }
+  }
+
+  // 4. If hint is present, use it as manufacturer name directly (URL slug is reliable)
   if (hintLower.length >= 3) {
     // Capitalise the hint properly (e.g. "diamond" → "Diamond", "czech aircraft works" → "Czech Aircraft Works")
     const properHint = hint!.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -401,22 +456,22 @@ export async function upsertAircraftListing(
     return "skipped";
   }
 
-  // Fix: ensure description is never empty (description_check constraint)
-  // Sanitize first, then check — some descriptions contain only HTML/whitespace
-  listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").trim();
-  if (listing.description.length < 10) {
-    listing.description = listing.title;
-  }
-  if (!listing.description || listing.description.trim().length < 10) {
-    const descParts = [listing.title];
-    if (listing.year) descParts.push(`Year: ${listing.year}`);
-    if (listing.engine) descParts.push(`Engine: ${listing.engine}`);
-    if (listing.location) descParts.push(`Location: ${listing.location}`);
-    if (listing.totalTime) descParts.push(`Total Time: ${listing.totalTime}h`);
+  // Ensure description meets the DB description_check constraint.
+  // Strip HTML, then build a rich fallback so the constraint (≥20 meaningful chars) is always met.
+  listing.description = (listing.description ?? "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+  if (listing.description.length < 20) {
+    const descParts: string[] = [listing.title];
+    if (listing.year) descParts.push(`Baujahr: ${listing.year}`);
+    if (listing.engine) descParts.push(`Motor: ${listing.engine}`);
+    if (listing.totalTime) descParts.push(`Betriebsstunden: ${listing.totalTime}h`);
+    if (listing.engineHours) descParts.push(`Motorstunden: ${listing.engineHours}h`);
+    if (listing.location) descParts.push(`Standort: ${listing.location}`);
+    if (listing.price) descParts.push(`Preis: ${listing.price} EUR`);
+    if (descParts.length === 1) descParts.push(listing.sourceUrl);
     listing.description = descParts.join(". ");
   }
-  if (!listing.description || listing.description.trim().length < 10) {
-    logger.debug("Skipping listing: no valid description or title", { sourceId: listing.sourceId });
+  if (!listing.description || listing.description.trim().length < 20) {
+    logger.debug("Skipping listing: no valid description", { sourceId: listing.sourceId });
     return "skipped";
   }
 
