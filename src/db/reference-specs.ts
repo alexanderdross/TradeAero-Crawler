@@ -100,8 +100,18 @@ export async function lookupReferenceSpecs(
     // Check manufacturer presence in text
     if (text.includes(entry.manufacturer)) score += 2;
 
-    // Check model presence in text
-    if (text.includes(entry.model)) score += 3;
+    // Check model presence in text.
+    // Short models (≤3 chars, e.g. "8", "J3") must match as whole words to prevent
+    // false positives like "8" matching inside "383 Hours" or "2008".
+    const modelTerm = entry.model;
+    let modelInText: boolean;
+    if (modelTerm.length <= 3) {
+      const escaped = modelTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      modelInText = new RegExp(`\\b${escaped}\\b`).test(text);
+    } else {
+      modelInText = text.includes(modelTerm);
+    }
+    if (modelInText) score += 3;
 
     // Bonus for variant match
     if (entry.variant && text.includes(entry.variant)) score += 1;

@@ -723,9 +723,21 @@ async function mapToAircraftRow(
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
-  // Use URL-based category hint (aircraft24) if available — more reliable than keyword detection
-  const categoryName = listing.categoryHint
-    ?? detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  // Detect category from title/engine/manufacturer keywords (always run — used as override guard)
+  const detectedCategory = detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  // Use URL-based category hint (aircraft24) if available, EXCEPT when our own detection
+  // confidently identifies the aircraft as a category aircraft24 often mislabels.
+  // Helicopters, UL/LSA, gliders, and flex-wing aircraft frequently appear in wrong aircraft24
+  // URL sections (e.g. Pipistrel Taurus listed under /turboprop/).
+  const DETECTION_WINS_CATEGORIES = new Set([
+    "Helicopter / Gyrocopter",
+    "Ultralight / Light Sport Aircraft (LSA)",
+    "Glider",
+    "Microlight / Flex-Wing",
+  ]);
+  const categoryName = (listing.categoryHint && !DETECTION_WINS_CATEGORIES.has(detectedCategory))
+    ? listing.categoryHint
+    : detectedCategory;
   const categoryId = await resolveCategoryId(categoryName);
   const seats = detectSeats(listing.title, listing.description);
   const originalUrl = listing.sourceUrl;
