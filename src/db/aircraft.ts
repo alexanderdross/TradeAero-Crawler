@@ -323,7 +323,25 @@ function detectCategoryName(title: string, description: string, engine: string |
   if (["robinson", "airbus helicopters", "bell", "leonardo", "md helicopters", "sikorsky", "enstrom", "guimbal", "schweizer"].includes(mfg)) return "Helicopter / Gyrocopter";
   if (["autogyro", "magni", "celier", "ela aviacion", "trendak", "rotorschmiede", "arrowcopter"].includes(mfg)) return "Helicopter / Gyrocopter";
 
-  // Gliders / Motorgliders
+  // Aerospool / Dynamic model-specific: WT-9 = LSA, WT-10 = SEP
+  // Must be checked before generic keyword and manufacturer-list checks.
+  if (mfg === "aerospool" || mfg === "dynamic") {
+    if (/wt.?10/i.test(text)) return "Single Engine Piston";
+    return "Ultralight / Light Sport Aircraft (LSA)";
+  }
+
+  // Known LSA/UL manufacturers — checked BEFORE the "motorsegler/glider" keyword trap so that
+  // descriptions mentioning "Motorsegler" (common in German UL listings) don't mis-classify them.
+  const lsaManufacturers = ["comco ikarus", "comco", "ikarus",
+    "flight design", "pipistrel", "tecnam", "evektor", "remos", "pioneer",
+    "fk lightplanes", "fk", "roland", "icp", "aeropro", "flysynthesis",
+    "tl ultralight", "dynaero", "zenair", "aeroprakt", "brm aero", "bristell",
+    "jabiru", "corvus", "alpi aviation", "atec", "shark aero", "tomark",
+    "blackshape", "czech sport aircraft", "sling", "breezer", "jmb",
+    "just aircraft", "kitfox", "rans", "sonex", "sd planes", "aeropilot"];
+  if (lsaManufacturers.includes(mfg)) return "Ultralight / Light Sport Aircraft (LSA)";
+
+  // Gliders / Motorgliders (keyword check now safe — known LSA manufacturers already handled above)
   if (/motorsegler|segelflug|glider|touring motor glider|tmg/i.test(text)) return "Glider";
   if (["stemme", "schempp-hirth", "dg flugzeugbau"].includes(mfg)) return "Glider";
   if (mfg === "scheibe") return "Glider";
@@ -358,24 +376,15 @@ function detectCategoryName(title: string, description: string, engine: string |
   if (/rotax|jabiru|ulpower|hks|simonini|polini|vittorazi|cors.?air|hirth/i.test(text)) return "Ultralight / Light Sport Aircraft (LSA)";
   if (/lycoming|continental|io-\d{3}|o-\d{3}|tio-|tsio-/i.test(text)) return "Single Engine Piston";
 
-  // Manufacturer-based fallback
+  // Manufacturer-based fallback (SEP + Experimental — LSA already handled above)
   const sepManufacturers = ["cessna", "piper", "beechcraft", "mooney", "grumman", "socata",
     "robin", "jodel", "grob", "zlin", "fuji", "commander", "lake", "bellanca",
     "stinson", "luscombe", "aeronca", "taylorcraft", "globe", "ercoupe",
     "maule", "aviat", "american champion", "cubcrafters", "extra"];
-  const lsaManufacturers = ["dynamic", "aerospool", "comco ikarus", "comco", "ikarus",
-    "flight design", "pipistrel", "tecnam", "evektor", "remos", "pioneer",
-    "fk lightplanes", "fk", "roland", "icp", "aeropro", "flysynthesis",
-    "tl ultralight", "dynaero", "zenair", "aeroprakt", "brm aero", "bristell",
-    "jabiru", "corvus", "alpi aviation", "atec", "shark aero", "tomark",
-    "blackshape", "czech sport aircraft", "sling", "breezer", "jmb",
-    "just aircraft", "kitfox", "rans", "sonex", "scheibe", "stemme",
-    "heller", "vampire", "sd planes", "aeropilot"];
   const experimentalManufacturers = ["vans", "van's", "lancair", "glasair", "murphy",
     "pitts", "xtremair", "sukhoi", "yakovlev", "cap aviation", "mudry", "nanchang"];
 
   if (sepManufacturers.includes(mfg)) return "Single Engine Piston";
-  if (lsaManufacturers.includes(mfg)) return "Ultralight / Light Sport Aircraft (LSA)";
   if (experimentalManufacturers.includes(mfg)) return "Experimental / Homebuilt";
 
   // Diamond: depends on model
@@ -714,9 +723,21 @@ async function mapToAircraftRow(
   const localeFields = buildLocaleFields(cleanHeadline, listing.description, translations);
   const engineInfo = parseEnginePower(listing.engine);
   const model = extractModel(listing.title, manufacturer.name);
-  // Use URL-based category hint (aircraft24) if available — more reliable than keyword detection
-  const categoryName = listing.categoryHint
-    ?? detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  // Detect category from title/engine/manufacturer keywords (always run — used as override guard)
+  const detectedCategory = detectCategoryName(listing.title, listing.description, listing.engine, manufacturer.name);
+  // Use URL-based category hint (aircraft24) if available, EXCEPT when our own detection
+  // confidently identifies the aircraft as a category aircraft24 often mislabels.
+  // Helicopters, UL/LSA, gliders, and flex-wing aircraft frequently appear in wrong aircraft24
+  // URL sections (e.g. Pipistrel Taurus listed under /turboprop/).
+  const DETECTION_WINS_CATEGORIES = new Set([
+    "Helicopter / Gyrocopter",
+    "Ultralight / Light Sport Aircraft (LSA)",
+    "Glider",
+    "Microlight / Flex-Wing",
+  ]);
+  const categoryName = (listing.categoryHint && !DETECTION_WINS_CATEGORIES.has(detectedCategory))
+    ? listing.categoryHint
+    : detectedCategory;
   const categoryId = await resolveCategoryId(categoryName);
   const seats = detectSeats(listing.title, listing.description);
   const originalUrl = listing.sourceUrl;
