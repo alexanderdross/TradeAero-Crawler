@@ -213,8 +213,9 @@ function extractSpecs(text: string): ExtractedSpecs {
   const yearMatch = text.match(/Baujahr[:\s]*(\d{4})/i);
   if (yearMatch) specs.year = parseInt(yearMatch[1], 10);
 
-  // Motor (engine) — capture up to 80 chars then strip overflow delimiters
-  const engineMatch = text.match(/Motor[:\s]*([^•\n]{3,80})/i);
+  // Motor (engine) — require "Motor:" label (colon mandatory) to avoid matching
+  // compound German words like "Kolbenmotorflugzeuge" that contain "motor" but are not engine labels.
+  const engineMatch = text.match(/\bMotor\s*:\s*([^•\n]{3,80})/i);
   if (engineMatch) {
     let eng = cleanText(engineMatch[1]);
     // Truncate at tokens that signal the engine field has overflowed into description text

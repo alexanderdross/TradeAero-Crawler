@@ -35,9 +35,12 @@ interface ReferenceSpec {
 
 /** Cache all reference specs on first load */
 let specsCache: Array<{
-  manufacturer: string;
-  model: string;
-  variant: string;
+  manufacturer: string;   // lowercase (for matching)
+  model: string;          // lowercase (for matching)
+  variant: string;        // lowercase (for matching)
+  manufacturer_orig: string; // original casing (for display)
+  model_orig: string;        // original casing (for display)
+  variant_orig: string;      // original casing (for display)
   specs: ReferenceSpec;
 }> | null = null;
 
@@ -58,6 +61,9 @@ async function loadCache(): Promise<typeof specsCache> {
     manufacturer: (row.manufacturer ?? "").toLowerCase(),
     model: (row.model ?? "").toLowerCase(),
     variant: (row.variant ?? "").toLowerCase(),
+    manufacturer_orig: (row.manufacturer ?? ""),
+    model_orig: (row.model ?? ""),
+    variant_orig: (row.variant ?? ""),
     specs: row as ReferenceSpec,
   }));
 
@@ -110,11 +116,11 @@ export async function lookupReferenceSpecs(
   if (bestScore >= 3 && bestMatch) {
     const matchEntry = cache.find(e => e.specs === bestMatch)!;
     logger.debug("Matched reference specs", { title: title.slice(0, 50), score: bestScore, model: matchEntry.model });
-    // Attach clean manufacturer/model/variant from reference data
+    // Attach clean manufacturer/model/variant from reference data (original casing for display)
     const result: Partial<ReferenceSpec> & { ref_manufacturer?: string; ref_model?: string; ref_variant?: string } = { ...bestMatch };
-    result.ref_manufacturer = matchEntry.manufacturer;
-    result.ref_model = matchEntry.model;
-    result.ref_variant = matchEntry.variant || undefined;
+    result.ref_manufacturer = matchEntry.manufacturer_orig;
+    result.ref_model = matchEntry.model_orig;
+    result.ref_variant = matchEntry.variant_orig || undefined;
     return result;
   }
 
