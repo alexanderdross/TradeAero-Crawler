@@ -12,61 +12,64 @@
 --
 -- Run in Supabase SQL Editor. Safe: only updates category_id, no deletions.
 
--- Preview: show miscategorized listings
-SELECT headline,
-  (SELECT name FROM aircraft_manufacturers WHERE id = manufacturer_id) AS manufacturer,
-  (SELECT name FROM aircraft_categories WHERE id = category_id) AS current_category
-FROM aircraft_listings
-WHERE is_external = true
-  AND category_id IN (
+-- Fix listings where the manufacturer exists in reference_specs with a different category
+-- than what the listing currently has.
+-- This handles ALL manufacturers at once (Mooney→SEP, Agusta→Helicopter, etc.)
+UPDATE aircraft_listings al
+SET category_id = correct_cat.id,
+    updated_at = now()
+FROM (
+  -- For each manufacturer, find the most common category in reference_specs
+  SELECT DISTINCT ON (rs.manufacturer)
+    am.id AS manufacturer_id,
+    ac.id,
+    ac.name AS category_name,
+    rs.manufacturer
+  FROM aircraft_reference_specs rs
+  JOIN aircraft_manufacturers am ON LOWER(am.name) = LOWER(rs.manufacturer)
+  JOIN aircraft_categories ac ON ac.name = rs.category
+  WHERE rs.category IS NOT NULL
+  GROUP BY rs.manufacturer, am.id, ac.id, ac.name
+  ORDER BY rs.manufacturer, COUNT(*) DESC
+) correct_cat
+WHERE al.manufacturer_id = correct_cat.manufacturer_id
+  AND al.is_external = true
+  AND al.category_id != correct_cat.id
+  -- Only fix listings currently in LSA or Microlight (the misassigned categories)
+  AND al.category_id IN (
     SELECT id FROM aircraft_categories
-    WHERE name IN ('Ultralight / Light Sport Aircraft (LSA)', 'Microlight / Flex-Wing')
-  )
-  AND manufacturer_id IN (
-    SELECT id FROM aircraft_manufacturers
-    WHERE LOWER(name) IN (
-      SELECT DISTINCT LOWER(manufacturer) FROM aircraft_reference_specs
-      WHERE category IS NOT NULL
-        AND category NOT IN ('Ultralight / Light Sport Aircraft (LSA)', 'Microlight / Flex-Wing')
+    WHERE name IN (
+      'Ultralight / Light Sport Aircraft (LSA)',
+      'Microlight / Flex-Wing'
     )
-  )
-ORDER BY manufacturer;
+  );
 
--- Fix Single Engine Piston manufacturers
-UPDATE aircraft_listings
-SET category_id = (SELECT id FROM aircraft_categories WHERE name = 'Single Engine Piston'),
-    updated_at = now()
-WHERE is_external = true
-  AND category_id IN (SELECT id FROM aircraft_categories WHERE name IN ('Ultralight / Light Sport Aircraft (LSA)', 'Microlight / Flex-Wing'))
-  AND manufacturer_id IN (SELECT id FROM aircraft_manufacturers WHERE LOWER(name) IN ('mooney', 'piper', 'siai-marchetti', 'yakovlev', 'scottish aviation'));
+-- Verification queries (uncomment to check results):
 
--- Fix Robinson helicopters
-UPDATE aircraft_listings
-SET category_id = (SELECT id FROM aircraft_categories WHERE name = 'Helicopter / Gyrocopter'),
-    updated_at = now()
-WHERE is_external = true
-  AND headline ILIKE 'Robinson R%'
-  AND category_id != (SELECT id FROM aircraft_categories WHERE name = 'Helicopter / Gyrocopter');
+-- Show what was fixed:
+-- SELECT al.headline, am.name AS manufacturer,
+--   old_cat.name AS old_category, new_cat.name AS new_category
+-- FROM aircraft_listings al
+-- JOIN aircraft_manufacturers am ON al.manufacturer_id = am.id
+-- JOIN aircraft_categories old_cat ON old_cat.id != al.category_id
+-- JOIN aircraft_categories new_cat ON new_cat.id = al.category_id
+-- WHERE al.is_external = true
+--   AND al.updated_at > now() - interval '5 minutes'
+-- ORDER BY am.name;
 
--- Fix Tecnam P2010 (SEP, not LSA)
-UPDATE aircraft_listings
-SET category_id = (SELECT id FROM aircraft_categories WHERE name = 'Single Engine Piston'),
-    updated_at = now()
-WHERE is_external = true
-  AND headline ILIKE '%Tecnam P2010%'
-  AND category_id IN (SELECT id FROM aircraft_categories WHERE name = 'Ultralight / Light Sport Aircraft (LSA)');
+-- Count listings per category after fix:
+-- SELECT ac.name AS category, COUNT(*) AS listing_count
+-- FROM aircraft_listings al
+-- JOIN aircraft_categories ac ON al.category_id = ac.id
+-- WHERE al.status = 'active' AND al.is_external = true
+-- GROUP BY ac.name
+-- ORDER BY listing_count DESC;
 
--- Fix Piper PA-23 Apache (MEP)
-UPDATE aircraft_listings
-SET category_id = (SELECT id FROM aircraft_categories WHERE name = 'Multi Engine Piston'),
-    updated_at = now()
-WHERE is_external = true
-  AND headline ILIKE '%PA-23%';
-
--- Verify results
-SELECT (SELECT name FROM aircraft_categories WHERE id = category_id) AS category,
-  COUNT(*) AS listing_count
-FROM aircraft_listings
-WHERE status = 'active' AND is_external = true
-GROUP BY category_id
-ORDER BY listing_count DESC;
+-- Remaining LSA/Microlight listings (should only be genuine UL/microlight now):
+-- SELECT al.headline, am.name AS manufacturer, ac.name AS category
+-- FROM aircraft_listings al
+-- LEFT JOIN aircraft_manufacturers am ON al.manufacturer_id = am.id
+-- JOIN aircraft_categories ac ON al.category_id = ac.id
+-- WHERE ac.name IN ('Ultralight / Light Sport Aircraft (LSA)', 'Microlight / Flex-Wing')
+--   AND al.is_external = true
+-- ORDER BY am.name;
