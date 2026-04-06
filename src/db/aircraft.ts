@@ -1,25 +1,15 @@
 import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
-import { config } from "../config.js";
 import { uploadImages } from "../utils/images.js";
 import { translateListing, type TranslationResult } from "../utils/translate.js";
+import { extractStructuredData, applyExtractedData } from "../utils/extract.js";
 import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import { lookupReferenceSpecs, applyReferenceSpecs } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
 import { stripTitleDatePrefix } from "../parsers/shared.js";
 
-/**
- * Known manufacturer names → their aircraft_manufacturers.id in the DB.
- * Looked up dynamically on first call and cached.
- */
 let manufacturerCache: Map<string, number> | null = null;
-
-/**
- * Unique manufacturer names from aircraft_reference_specs table (cached).
- * This is the single source of truth for valid manufacturer names.
- * No more hardcoded KNOWN_MANUFACTURERS list — reference specs has 610+ models.
- */
 let refSpecManufacturers: string[] | null = null;
 
 async function loadRefSpecManufacturers(): Promise<string[]> {
@@ -29,7 +19,6 @@ async function loadRefSpecManufacturers(): Promise<string[]> {
     .select("manufacturer");
   const raw: string[] = (data ?? []).map((r: any) => r.manufacturer as string).filter(Boolean);
   const unique = [...new Set(raw)];
-  // Sort longest first for better matching (e.g. "Comco Ikarus" before "Ikarus")
   refSpecManufacturers = unique.sort((a: string, b: string) => b.length - a.length);
   return refSpecManufacturers;
 }
@@ -41,10 +30,6 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
   return manufacturerCache;
 }
 
-/**
- * Resolve manufacturer from listing title.
- * Uses reference spec manufacturers as source of truth.
- */
 async function resolveManufacturer(title: string): Promise<string | null> {
   const manufacturers = await loadRefSpecManufacturers();
   const lower = title.toLowerCase();
@@ -55,83 +40,25 @@ async function resolveManufacturer(title: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Category detection helpers
+// Category detection
 // ---------------------------------------------------------------------------
 
-/**
- * Detect a normalised category name from source metadata and listing title.
- * Returns one of the values in the aircraft_categories table, or null.
- */
-function detectCategoryName(
-  sourceUrl: string | undefined,
-  title: string,
-): string | null {
+function detectCategoryName(sourceUrl: string | undefined, title: string): string | null {
   const url = (sourceUrl ?? "").toLowerCase();
   const t = title.toLowerCase();
 
-  // Explicit UL / LSA markers in URL path or title
-  if (
-    url.includes("/ul-") ||
-    url.includes("/ultraleicht") ||
-    url.includes("ul-flugzeug") ||
-    url.includes("helmuts-ul-seiten.de") ||
-    t.includes("ultralight") ||
-    t.includes("ultraleicht") ||
-    t.includes(" ul ") ||
-    t.match(/\bul\b/)
-  ) {
-    return "LSA / Ultralight";
-  }
-
-  // Helicopter keywords
-  if (
-    url.includes("/hubschrauber") ||
-    url.includes("/helicopter") ||
-    t.includes("helicopter") ||
-    t.includes("hubschrauber") ||
-    t.includes("gyrocopter") ||
-    t.includes("autogyro")
-  ) {
-    return "Helicopter";
-  }
-
-  // Glider / motorglider
-  if (
-    url.includes("/segelflugzeug") ||
-    url.includes("/glider") ||
-    t.includes("glider") ||
-    t.includes("segelflugzeug") ||
-    t.includes("sailplane") ||
-    t.includes("motorsegler") ||
-    t.includes("motor glider")
-  ) {
-    return "Glider / Motor Glider";
-  }
-
-  // Turboprop
-  if (
-    url.includes("/turboprop") ||
-    t.includes("turboprop") ||
-    t.includes("turbo prop")
-  ) {
-    return "Turboprop";
-  }
-
-  // Jet
-  if (
-    url.includes("/jet") ||
-    t.includes(" jet") ||
-    t.match(/\bjet\b/)
-  ) {
-    return "Jet";
-  }
-
+  if (url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
+      url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
+      t.includes(" ul ") || t.match(/\bul\b/)) return "LSA / Ultralight";
+  if (url.includes("/hubschrauber") || url.includes("/helicopter") || t.includes("helicopter") ||
+      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro")) return "Helicopter";
+  if (url.includes("/segelflugzeug") || url.includes("/glider") || t.includes("glider") ||
+      t.includes("segelflugzeug") || t.includes("sailplane") || t.includes("motorsegler") ||
+      t.includes("motor glider")) return "Glider / Motor Glider";
+  if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop")) return "Turboprop";
+  if (url.includes("/jet") || t.includes(" jet") || t.match(/\bjet\b/)) return "Jet";
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// Category lookup (DB)
-// ---------------------------------------------------------------------------
 
 let categoryCache: Map<string, number> | null = null;
 
@@ -149,143 +76,194 @@ async function getCategoryId(name: string): Promise<number | null> {
 
 export async function upsertAircraftListing(
   listing: ParsedAircraftListing,
-  sourceUrl?: string,
+  systemUserId: string,
 ): Promise<"inserted" | "updated" | "skipped"> {
   try {
     logger.info(`Processing listing: ${listing.title}`);
 
-    // ------------------------------------------------------------------
-    // 0.  Skip external listings with no images (low quality, not publishable)
-    // ------------------------------------------------------------------
-    if (!listing.images || listing.images.length === 0) {
+    // 0. Skip listings with no images
+    if (!listing.imageUrls || listing.imageUrls.length === 0) {
       logger.debug(`Skipping listing with no images: "${listing.title}"`);
       return "skipped";
     }
 
-    // ------------------------------------------------------------------
-    // 1.  Strip date prefixes injected by some parsers
-    // ------------------------------------------------------------------
+    // 1. Clean title
     const cleanTitle = stripTitleDatePrefix(listing.title);
 
-    // ------------------------------------------------------------------
-    // 2.  Resolve manufacturer
-    // ------------------------------------------------------------------
+    // 2. Resolve manufacturer
     const manufacturerName = await resolveManufacturer(cleanTitle);
     const manufacturerMap = await getManufacturerMap();
     const manufacturerId = manufacturerName
       ? (manufacturerMap.get(manufacturerName.toLowerCase()) ?? null)
       : null;
 
-    // ------------------------------------------------------------------
-    // 3.  Reference specs enrichment
-    // ------------------------------------------------------------------
+    // 3. Reference specs
     const refSpecs = manufacturerName
       ? await lookupReferenceSpecs(manufacturerName, cleanTitle)
       : null;
 
-    // ------------------------------------------------------------------
-    // 4.  Category resolution
-    // ------------------------------------------------------------------
-    const detectedCategoryName = detectCategoryName(sourceUrl, cleanTitle);
-    const categoryId = detectedCategoryName
-      ? await getCategoryId(detectedCategoryName)
-      : null;
+    // 4. Category
+    const detectedCategoryName = detectCategoryName(listing.sourceUrl, cleanTitle);
+    const categoryId = detectedCategoryName ? await getCategoryId(detectedCategoryName) : null;
 
-    // ------------------------------------------------------------------
-    // 5.  Build base aircraft record
-    // ------------------------------------------------------------------
-    const aircraft: Record<string, unknown> = {
-      title: cleanTitle,
-      price: listing.price ?? null,
-      year: listing.year ?? null,
-      hours: listing.hours ?? null,
-      location: listing.location ?? null,
-      description: listing.description ?? null,
-      source_url: listing.url,
-      source: listing.source,
-      manufacturer_id: manufacturerId,
-      category_id: categoryId,
-      is_active: true,
-      last_seen_at: new Date().toISOString(),
-    };
+    // 5. Dedup check
+    const { data: existing } = await supabase
+      .from("aircraft_listings")
+      .select("id")
+      .eq("source_url", listing.sourceId)
+      .maybeSingle();
 
-    // ------------------------------------------------------------------
-    // 6.  Apply reference specs (fills engine_type, range_nm, etc.)
-    // ------------------------------------------------------------------
-    if (refSpecs) {
-      applyReferenceSpecs(aircraft, refSpecs);
-    }
+    // 6. Images (only for new listings)
+    const images = existing
+      ? []
+      : await uploadImages(listing.imageUrls, cleanTitle, "aircraft-images");
 
-    // ------------------------------------------------------------------
-    // 7.  Translations
-    // ------------------------------------------------------------------
+    // 7. Extract structured data from description using Claude
+    const extracted = await extractStructuredData(cleanTitle, listing.description ?? "");
+
+    // 8. Translations (use cleaned description if extraction produced one)
+    const descForTranslation = extracted?.cleaned_description ?? listing.description ?? "";
     let translations: TranslationResult | null = null;
-    if (config.openai.apiKey && listing.description) {
+    if (process.env.ANTHROPIC_API_KEY && descForTranslation) {
       try {
-        translations = await translateListing({
-          title: cleanTitle,
-          description: listing.description,
-        });
+        translations = await translateListing(cleanTitle, descForTranslation, "de");
       } catch (err) {
         logger.warn(`Translation failed for "${cleanTitle}": ${err}`);
       }
     }
 
-    // Build locale title/description fields
-    const localeFields = buildLocaleFields(
-      cleanTitle,
-      listing.description ?? "",
-      translations,
-    );
-    Object.assign(aircraft, localeFields);
+    const localeFields = buildLocaleFields(cleanTitle, descForTranslation, translations);
 
-    // ------------------------------------------------------------------
-    // 8.  Check dedup — determine INSERT vs UPDATE
-    // ------------------------------------------------------------------
-    const { data: existing } = await supabase
-      .from("aircraft")
-      .select("id")
-      .eq("source_url", listing.url)
-      .maybeSingle();
+    // 9. Build record
+    const record: Record<string, unknown> = {
+      user_id: systemUserId,
+      headline: cleanTitle,
+      description: descForTranslation,
+      year: listing.year ?? null,
+      price: listing.price ?? null,
+      currency: "EUR",
+      price_negotiable: listing.priceNegotiable,
+      total_time: listing.totalTime ?? null,
+      engine_hours: listing.engineHours ?? null,
+      engine_type_name: listing.engine ?? null,
+      location: listing.location ?? null,
+      country: listing.country ?? "Germany",
+      city: listing.city ?? null,
+      icaocode: listing.icaoCode ?? null,
+      registration: listing.registration ?? null,
+      serial_number: listing.serialNumber ?? null,
+      manufacturer_id: manufacturerId,
+      category_id: categoryId,
+      status: "active",
+      source_name: listing.sourceName,
+      source_url: listing.sourceId,
+      is_external: true,
+      contact_name: listing.contactName ?? listing.sourceName,
+      contact_email: listing.contactEmail ?? "noreply@trade.aero",
+      contact_phone: listing.contactPhone ?? "",
+      seats: "2",
+      fuel_type: listing.fuelType ?? null,
+      empty_weight: listing.emptyWeight ? String(listing.emptyWeight) : null,
+      max_takeoff_weight: listing.maxTakeoffWeight ? String(listing.maxTakeoffWeight) : null,
+      fuel_capacity: listing.fuelCapacity ? String(listing.fuelCapacity) : null,
+      cruise_speed: listing.cruiseSpeed ? String(listing.cruiseSpeed) : null,
+      max_speed: listing.maxSpeed ? String(listing.maxSpeed) : null,
+      max_range: listing.maxRange ? String(listing.maxRange) : null,
+      service_ceiling: listing.serviceCeiling ? String(listing.serviceCeiling) : null,
+      auto_translate: false,
+      headline_auto_translate: false,
+      agree_to_terms: true,
+      ...localeFields,
+    };
 
+    // Avionics from parser
+    if (listing.avionicsText) {
+      record.avionics_other = listing.avionicsText;
+    }
+
+    // 10. Apply extracted structured data (fills engine, avionics, equipment, etc.)
+    if (extracted) {
+      applyExtractedData(record, extracted);
+    }
+
+    // 11. Apply reference specs (fills remaining missing performance data)
+    if (refSpecs) {
+      applyReferenceSpecs(record, refSpecs);
+    }
+
+    // Only include images for new listings
+    if (images.length > 0) {
+      record.images = images.map((img: any, idx: number) => {
+        const enriched: Record<string, unknown> = {
+          url: img.url,
+          alt_text: img.alt_text || cleanTitle,
+          auto_translate: false,
+          sort_order: idx,
+        };
+        for (const lang of LANGS) {
+          const t = translations?.[lang];
+          enriched[`alt_text_${lang}`] = t?.headline
+            ? `${t.headline} - Image ${idx + 1}`
+            : `${cleanTitle} - Image ${idx + 1}`;
+        }
+        return enriched;
+      });
+    }
+
+    // 12. Upsert
     if (existing) {
-      // UPDATE existing listing
-      const { error: updateError } = await supabase
-        .from("aircraft")
-        .update(aircraft)
+      const updateFields: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(record)) {
+        if (/^(headline|description|slug)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
+        if (key === "slug" || key === "images") continue;
+        updateFields[key] = value;
+      }
+
+      const { error } = await supabase
+        .from("aircraft_listings")
+        .update({ ...updateFields, updated_at: new Date().toISOString() })
         .eq("id", existing.id);
 
-      if (updateError) {
-        logger.error(`Failed to update aircraft "${cleanTitle}": ${updateError.message}`);
+      if (error) {
+        logger.error(`Failed to update aircraft "${cleanTitle}": ${error.message}`);
         return "skipped";
       }
       logger.info(`Updated aircraft id=${existing.id} title="${cleanTitle}"`);
       return "updated";
     }
 
-    // INSERT new listing
-    const { data: upserted, error: upsertError } = await supabase
-      .from("aircraft")
-      .insert(aircraft)
-      .select("id")
+    const { data: inserted, error } = await supabase
+      .from("aircraft_listings")
+      .insert(record)
+      .select("id, slug, listing_number")
       .single();
 
-    if (upsertError) {
-      logger.error(`Failed to insert aircraft "${cleanTitle}": ${upsertError.message}`);
+    if (error) {
+      const level = error.message?.includes("check constraint") ? "warn" : "error";
+      logger[level](`Failed to insert aircraft "${cleanTitle}": ${error.message}`);
       return "skipped";
     }
 
-    const aircraftId: number = upserted.id;
-    logger.info(`Inserted aircraft id=${aircraftId} title="${cleanTitle}"`);
+    // Generate localized slugs
+    const listingNum = (inserted as any).listing_number ?? null;
+    if (listingNum && translations) {
+      const slugUpdate: Record<string, string> = {};
+      if ((inserted as any).slug) slugUpdate.slug_en = (inserted as any).slug;
+      for (const lang of LANGS) {
+        if (lang === "en") continue;
+        const headline = (record as Record<string, unknown>)[`headline_${lang}`];
+        if (headline && typeof headline === "string" && headline.trim()) {
+          slugUpdate[`slug_${lang}`] = generateSlug(headline, listingNum);
+        }
+      }
+      if (Object.keys(slugUpdate).length > 0) {
+        await supabase.from("aircraft_listings").update(slugUpdate).eq("id", (inserted as any).id);
+      }
+    }
 
-    // ------------------------------------------------------------------
-    // 9.  Images
-    // ------------------------------------------------------------------
-    await handleImages(aircraftId, listing.images);
+    logger.info(`Inserted aircraft id=${(inserted as any).id} title="${cleanTitle}"`);
 
-    // ------------------------------------------------------------------
-    // 10. Seed reference catalogue entry (best-effort)
-    // ------------------------------------------------------------------
+    // 13. Seed reference catalogue
     if (manufacturerName) {
       await seedReferenceEntry(manufacturerName, cleanTitle);
     }
@@ -297,274 +275,40 @@ export async function upsertAircraftListing(
   }
 }
 
-// Legacy alias — kept for backward compatibility
 export const upsertAircraft = upsertAircraftListing;
 
-// ---------------------------------------------------------------------------
-// Image handling
-// ---------------------------------------------------------------------------
-
-async function handleImages(aircraftId: number, imageUrls: string[]): Promise<void> {
-  try {
-    // Check which images already exist for this aircraft
-    const { data: existingImages } = await supabase
-      .from("aircraft_images")
-      .select("source_url")
-      .eq("aircraft_id", aircraftId);
-
-    const existingUrls = new Set((existingImages ?? []).map((img: any) => img.source_url));
-    const newUrls = imageUrls.filter((url) => !existingUrls.has(url));
-
-    if (newUrls.length === 0) {
-      logger.info(`No new images for aircraft id=${aircraftId}`);
-      return;
-    }
-
-    logger.info(`Uploading ${newUrls.length} new images for aircraft id=${aircraftId}`);
-
-    // Upload images to storage
-    const uploadedImages = await uploadImages(aircraftId, newUrls);
-
-    if (uploadedImages.length === 0) {
-      logger.warn(`No images successfully uploaded for aircraft id=${aircraftId}`);
-      return;
-    }
-
-    // Insert image records
-    const imageRecords = uploadedImages.map((img, index) => ({
-      aircraft_id: aircraftId,
-      source_url: img.sourceUrl,
-      storage_path: img.storagePath,
-      storage_url: img.storageUrl,
-      display_order: index,
-      is_primary: index === 0,
-    }));
-
-    const { error: imageError } = await supabase
-      .from("aircraft_images")
-      .upsert(imageRecords, { onConflict: "aircraft_id,source_url" });
-
-    if (imageError) {
-      logger.error(`Failed to insert images for aircraft id=${aircraftId}: ${imageError.message}`);
-    } else {
-      logger.info(`Inserted ${imageRecords.length} images for aircraft id=${aircraftId}`);
-    }
-  } catch (err) {
-    logger.error(`Error handling images for aircraft id=${aircraftId}: ${err}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Listing deactivation
-// ---------------------------------------------------------------------------
-
-/**
- * Mark aircraft listings as inactive if they haven't been seen recently.
- * This is called after each crawl run to clean up stale listings.
- */
-export async function deactivateStaleListings(
-  source: string,
-  activeUrls: string[],
-): Promise<void> {
-  try {
-    if (activeUrls.length === 0) {
-      logger.warn(`deactivateStaleListings called with empty activeUrls for source=${source}`);
-      return;
-    }
-
-    const { error } = await supabase
-      .from("aircraft")
-      .update({ is_active: false })
-      .eq("source", source)
-      .eq("is_active", true)
-      .not("source_url", "in", `(${activeUrls.map((u) => `"${u}"`).join(",")})`);
-
-    if (error) {
-      logger.error(`Failed to deactivate stale listings for source=${source}: ${error.message}`);
-    } else {
-      logger.info(`Deactivated stale listings for source=${source}`);
-    }
-  } catch (err) {
-    logger.error(`Error deactivating stale listings: ${err}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Locale helpers (re-exported for convenience)
-// ---------------------------------------------------------------------------
-
 export { LANGS };
-
-// ---------------------------------------------------------------------------
-// Slug generation
-// ---------------------------------------------------------------------------
-
-/**
- * Generate and persist a URL slug for an aircraft listing.
- * Called after upsert to ensure slugs are always set.
- */
-export async function ensureSlug(aircraftId: number, title: string): Promise<void> {
-  try {
-    const slug = generateSlug(title, aircraftId);
-    const { error } = await supabase
-      .from("aircraft")
-      .update({ slug })
-      .eq("id", aircraftId)
-      .is("slug", null);
-
-    if (error) {
-      logger.warn(`Failed to set slug for aircraft id=${aircraftId}: ${error.message}`);
-    }
-  } catch (err) {
-    logger.warn(`Error ensuring slug for aircraft id=${aircraftId}: ${err}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Bulk operations
-// ---------------------------------------------------------------------------
-
-/**
- * Upsert multiple aircraft listings in sequence.
- * Errors on individual listings are caught and logged without stopping the batch.
- */
-export async function upsertAircraftBatch(
-  listings: ParsedAircraftListing[],
-  sourceUrl?: string,
-): Promise<{ success: number; failed: number }> {
-  let success = 0;
-  let failed = 0;
-
-  for (const listing of listings) {
-    try {
-      await upsertAircraftListing(listing, sourceUrl);
-      success++;
-    } catch (err) {
-      logger.error(`Batch upsert failed for "${listing.title}": ${err}`);
-      failed++;
-    }
-  }
-
-  logger.info(`Batch upsert complete: ${success} succeeded, ${failed} failed`);
-  return { success, failed };
-}
-
-// ---------------------------------------------------------------------------
-// Statistics / reporting
-// ---------------------------------------------------------------------------
-
-export async function getAircraftStats(): Promise<{
-  total: number;
-  active: number;
-  bySource: Record<string, number>;
-}> {
-  const { data: allAircraft } = await supabase
-    .from("aircraft")
-    .select("id, is_active, source");
-
-  const total = allAircraft?.length ?? 0;
-  const active = allAircraft?.filter((a: any) => a.is_active).length ?? 0;
-  const bySource: Record<string, number> = {};
-
-  for (const a of allAircraft ?? []) {
-    bySource[a.source] = (bySource[a.source] ?? 0) + 1;
-  }
-
-  return { total, active, bySource };
-}
-
-// ---------------------------------------------------------------------------
-// Source URL helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Check if a listing URL already exists in the database.
- * Returns the aircraft id if found, null otherwise.
- */
-export async function findBySourceUrl(sourceUrl: string): Promise<number | null> {
-  const { data } = await supabase
-    .from("aircraft")
-    .select("id")
-    .eq("source_url", sourceUrl)
-    .single();
-
-  return data?.id ?? null;
-}
-
-/**
- * Get all active source URLs for a given crawl source.
- * Used to determine which listings have gone stale.
- */
-export async function getActiveSourceUrls(source: string): Promise<string[]> {
-  const { data } = await supabase
-    .from("aircraft")
-    .select("source_url")
-    .eq("source", source)
-    .eq("is_active", true);
-
-  return (data ?? []).map((row: any) => row.source_url);
-}
 
 // ---------------------------------------------------------------------------
 // Manufacturer helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Ensure a manufacturer exists in the aircraft_manufacturers table.
- * Returns the manufacturer id (existing or newly created).
- */
 export async function ensureManufacturer(name: string): Promise<number | null> {
   try {
-    // Check cache first
     const map = await getManufacturerMap();
     const cached = map.get(name.toLowerCase());
     if (cached !== undefined) return cached;
-
-    // Insert if not found
     const { data, error } = await supabase
       .from("aircraft_manufacturers")
       .upsert({ name }, { onConflict: "name" })
       .select("id")
       .single();
-
-    if (error || !data) {
-      logger.warn(`Failed to ensure manufacturer "${name}": ${error?.message}`);
-      return null;
-    }
-
-    // Update cache
+    if (error || !data) { logger.warn(`Failed to ensure manufacturer "${name}": ${error?.message}`); return null; }
     map.set(name.toLowerCase(), data.id);
     return data.id;
-  } catch (err) {
-    logger.warn(`Error ensuring manufacturer "${name}": ${err}`);
-    return null;
-  }
+  } catch (err) { logger.warn(`Error ensuring manufacturer "${name}": ${err}`); return null; }
 }
 
 // ---------------------------------------------------------------------------
 // Reference catalogue seeding
 // ---------------------------------------------------------------------------
 
-/**
- * Seed a minimal entry in aircraft_reference_specs if the model is unknown.
- * This allows the reference catalogue to grow organically as new models appear.
- */
 async function seedReferenceEntry(manufacturer: string, title: string): Promise<void> {
   try {
-    // Extract model from title by removing manufacturer prefix
     const model = title.replace(new RegExp(manufacturer, "i"), "").trim().slice(0, 100) || "Unknown";
-    const variant = null;
-
-    // Only seed if not already present (upsert with ignoreDuplicates)
     await (supabase as any)
       .from("aircraft_reference_specs")
-      .upsert({
-        manufacturer,
-        model,
-        variant,
-        notes: `Auto-seeded from listing title: "${title.slice(0, 200)}"`,
-      }, { onConflict: "manufacturer,model,variant", ignoreDuplicates: true });
-  } catch {
-    // Non-critical — don't fail the crawl for reference seeding issues
-  }
+      .upsert({ manufacturer, model, variant: null, notes: `Auto-seeded from listing title: "${title.slice(0, 200)}"` },
+        { onConflict: "manufacturer,model,variant", ignoreDuplicates: true });
+  } catch { /* non-critical */ }
 }
