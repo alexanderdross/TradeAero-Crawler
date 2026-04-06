@@ -2,7 +2,7 @@ name: "Crawl Aircraft24.de"
 
 on:
   schedule:
-    - cron: "0 7 * * 1,3,5"
+    - cron: "0 7 * * 1,4"
   workflow_dispatch:
     inputs:
       target:
