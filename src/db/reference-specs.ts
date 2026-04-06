@@ -41,6 +41,7 @@ let specsCache: Array<{
   manufacturer_orig: string; // original casing (for display)
   model_orig: string;        // original casing (for display)
   variant_orig: string;      // original casing (for display)
+  category: string | null;   // e.g. "Single Engine Piston", "Helicopter / Gyrocopter"
   specs: ReferenceSpec;
 }> | null = null;
 
@@ -57,13 +58,14 @@ async function loadCache(): Promise<typeof specsCache> {
     return specsCache;
   }
 
-  specsCache = (data ?? []).map((row) => ({
+  specsCache = (data ?? []).map((row: any) => ({
     manufacturer: (row.manufacturer ?? "").toLowerCase(),
     model: (row.model ?? "").toLowerCase(),
     variant: (row.variant ?? "").toLowerCase(),
     manufacturer_orig: (row.manufacturer ?? ""),
     model_orig: (row.model ?? ""),
     variant_orig: (row.variant ?? ""),
+    category: (row.category as string) ?? null,
     specs: row as ReferenceSpec,
   }));
 
@@ -190,4 +192,47 @@ export function applyReferenceSpecs(
   }
 
   return enriched;
+}
+
+/**
+ * Look up the aircraft category from reference specs by matching manufacturer
+ * and (optionally) model in the title.
+ *
+ * Uses the same cached data from aircraft_reference_specs.
+ * Returns the category string (e.g. "Single Engine Piston") or null.
+ */
+export async function lookupCategoryFromRefSpecs(
+  title: string,
+  manufacturerName: string | null,
+): Promise<string | null> {
+  if (!manufacturerName) return null;
+  const cache = await loadCache();
+  if (!cache || cache.length === 0) return null;
+
+  const mfgLower = manufacturerName.toLowerCase();
+  const titleLower = title.toLowerCase();
+
+  // First try: match manufacturer + model in title for most specific category
+  let bestCategory: string | null = null;
+  let bestScore = 0;
+
+  for (const entry of cache) {
+    if (entry.manufacturer !== mfgLower) continue;
+    if (!entry.category) continue;
+
+    let score = 1; // manufacturer match
+    if (titleLower.includes(entry.model)) score += 3; // model match
+    if (entry.variant && titleLower.includes(entry.variant)) score += 1;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestCategory = entry.category;
+    }
+  }
+
+  if (bestCategory) return bestCategory;
+
+  // Fallback: any reference spec entry for this manufacturer with a category
+  const mfgEntry = cache.find(e => e.manufacturer === mfgLower && e.category);
+  return mfgEntry?.category ?? null;
 }
