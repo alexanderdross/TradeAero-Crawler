@@ -147,12 +147,20 @@ async function getCategoryId(name: string): Promise<number | null> {
 // Main upsert
 // ---------------------------------------------------------------------------
 
-export async function upsertAircraft(
+export async function upsertAircraftListing(
   listing: ParsedAircraftListing,
   sourceUrl?: string,
-): Promise<void> {
+): Promise<"inserted" | "updated" | "skipped"> {
   try {
     logger.info(`Processing listing: ${listing.title}`);
+
+    // ------------------------------------------------------------------
+    // 0.  Skip external listings with no images (low quality, not publishable)
+    // ------------------------------------------------------------------
+    if (!listing.images || listing.images.length === 0) {
+      logger.debug(`Skipping listing with no images: "${listing.title}"`);
+      return "skipped";
+    }
 
     // ------------------------------------------------------------------
     // 1.  Strip date prefixes injected by some parsers
@@ -232,28 +240,48 @@ export async function upsertAircraft(
     Object.assign(aircraft, localeFields);
 
     // ------------------------------------------------------------------
-    // 8.  Upsert aircraft row
+    // 8.  Check dedup — determine INSERT vs UPDATE
     // ------------------------------------------------------------------
+    const { data: existing } = await supabase
+      .from("aircraft")
+      .select("id")
+      .eq("source_url", listing.url)
+      .maybeSingle();
+
+    if (existing) {
+      // UPDATE existing listing
+      const { error: updateError } = await supabase
+        .from("aircraft")
+        .update(aircraft)
+        .eq("id", existing.id);
+
+      if (updateError) {
+        logger.error(`Failed to update aircraft "${cleanTitle}": ${updateError.message}`);
+        return "skipped";
+      }
+      logger.info(`Updated aircraft id=${existing.id} title="${cleanTitle}"`);
+      return "updated";
+    }
+
+    // INSERT new listing
     const { data: upserted, error: upsertError } = await supabase
       .from("aircraft")
-      .upsert(aircraft, { onConflict: "source_url" })
+      .insert(aircraft)
       .select("id")
       .single();
 
     if (upsertError) {
-      logger.error(`Failed to upsert aircraft "${cleanTitle}": ${upsertError.message}`);
-      return;
+      logger.error(`Failed to insert aircraft "${cleanTitle}": ${upsertError.message}`);
+      return "skipped";
     }
 
     const aircraftId: number = upserted.id;
-    logger.info(`Upserted aircraft id=${aircraftId} title="${cleanTitle}"`);
+    logger.info(`Inserted aircraft id=${aircraftId} title="${cleanTitle}"`);
 
     // ------------------------------------------------------------------
     // 9.  Images
     // ------------------------------------------------------------------
-    if (listing.images && listing.images.length > 0) {
-      await handleImages(aircraftId, listing.images);
-    }
+    await handleImages(aircraftId, listing.images);
 
     // ------------------------------------------------------------------
     // 10. Seed reference catalogue entry (best-effort)
@@ -261,10 +289,16 @@ export async function upsertAircraft(
     if (manufacturerName) {
       await seedReferenceEntry(manufacturerName, cleanTitle);
     }
+
+    return "inserted";
   } catch (err) {
-    logger.error(`Unexpected error in upsertAircraft: ${err}`);
+    logger.error(`Unexpected error in upsertAircraftListing: ${err}`);
+    return "skipped";
   }
 }
+
+// Legacy alias — kept for backward compatibility
+export const upsertAircraft = upsertAircraftListing;
 
 // ---------------------------------------------------------------------------
 // Image handling
@@ -403,7 +437,7 @@ export async function upsertAircraftBatch(
 
   for (const listing of listings) {
     try {
-      await upsertAircraft(listing, sourceUrl);
+      await upsertAircraftListing(listing, sourceUrl);
       success++;
     } catch (err) {
       logger.error(`Batch upsert failed for "${listing.title}": ${err}`);
