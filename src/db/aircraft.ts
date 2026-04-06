@@ -5,7 +5,7 @@ import { translateListing, type TranslationResult } from "../utils/translate.js"
 import { extractStructuredData, applyExtractedData } from "../utils/extract.js";
 import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
-import { lookupReferenceSpecs, applyReferenceSpecs } from "./reference-specs.js";
+import { lookupReferenceSpecs, applyReferenceSpecs, lookupCategoryFromRefSpecs } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
 import { stripTitleDatePrefix } from "../parsers/shared.js";
 
@@ -34,20 +34,37 @@ async function resolveManufacturer(title: string): Promise<string | null> {
   return null;
 }
 
-function detectCategoryName(sourceUrl: string | undefined, title: string): string | null {
+// ---------------------------------------------------------------------------
+// Category detection: uses aircraft_reference_specs table as source of truth,
+// falls back to URL/title keyword heuristics for unknown manufacturers.
+// ---------------------------------------------------------------------------
+
+function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: string): string | null {
   const url = (sourceUrl ?? "").toLowerCase();
   const t = title.toLowerCase();
-  if (url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
-      url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
-      t.includes(" ul ") || t.match(/\bul\b/)) return "LSA / Ultralight";
   if (url.includes("/hubschrauber") || url.includes("/helicopter") || t.includes("helicopter") ||
-      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro")) return "Helicopter";
+      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro")) return "Helicopter / Gyrocopter";
   if (url.includes("/segelflugzeug") || url.includes("/glider") || t.includes("glider") ||
       t.includes("segelflugzeug") || t.includes("sailplane") || t.includes("motorsegler") ||
-      t.includes("motor glider")) return "Glider / Motor Glider";
+      t.includes("motor glider")) return "Glider";
   if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop")) return "Turboprop";
   if (url.includes("/jet") || t.includes(" jet") || t.match(/\bjet\b/)) return "Jet";
+  if (url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
+      url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
+      t.includes(" ul ") || t.match(/\bul\b/)) return "Ultralight / Light Sport Aircraft (LSA)";
   return null;
+}
+
+async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null): Promise<string | null> {
+  // 1. Reference specs lookup takes priority — the table has correct category
+  //    for every known manufacturer+model combo (475+ entries).
+  //    This prevents e.g. Mooney/Piper/Agusta being miscategorized as LSA
+  //    just because they appear on helmuts-ul-seiten.de.
+  const refCategory = await lookupCategoryFromRefSpecs(title, manufacturerName ?? null);
+  if (refCategory) return refCategory;
+
+  // 2. Fallback to URL/title keyword heuristics (for new/unknown manufacturers)
+  return detectCategoryFromUrlAndTitle(sourceUrl, title);
 }
 
 let categoryCache: Map<string, number> | null = null;
@@ -82,10 +99,9 @@ export async function upsertAircraftListing(
     const manufacturerId = manufacturerName
       ? (manufacturerMap.get(manufacturerName.toLowerCase()) ?? null) : null;
 
-    const refSpecs = manufacturerName
-      ? await lookupReferenceSpecs(manufacturerName, cleanTitle) : null;
+    const refSpecs = await lookupReferenceSpecs(cleanTitle, listing.description ?? "", listing.engine ?? null);
 
-    const detectedCategoryName = detectCategoryName(listing.sourceUrl, cleanTitle);
+    const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName);
     const categoryId = detectedCategoryName ? await getCategoryId(detectedCategoryName) : null;
 
     // Dedup
