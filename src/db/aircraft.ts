@@ -219,9 +219,10 @@ async function resolveManufacturer(title: string, hint?: string): Promise<Manufa
     }
   }
 
-  // No match → listing saved as draft for admin review
+  // No match → publish as active with "Other" manufacturer; a placeholder is added
+  // to aircraft_reference_specs so the next crawl re-resolves it once admin enriches the entry.
   const id = await createManufacturer("Other");
-  logger.warn("Could not resolve manufacturer — listing saved as draft", { title: title.slice(0, 80) });
+  logger.warn("Could not resolve manufacturer — saved as Other, pending admin review", { title: title.slice(0, 80) });
   return { id, name: "Other", confidence: "low" };
 }
 
@@ -749,9 +750,10 @@ export async function upsertAircraftListing(
 
   logger.debug("Inserted aircraft listing", { sourceId: listing.sourceId, listingNumber: listingNum });
 
-  // Log draft listings for admin review
+  // Log unresolved manufacturers for admin review and seed aircraft_reference_specs
   if (manufacturer.confidence === "low") {
     await logDraftForReview(listing.title, listing.sourceId, manufacturer.name);
+    await recordUnresolvedManufacturer(listing.title, manufacturer.name);
   }
 
   return "inserted";
@@ -869,10 +871,9 @@ async function mapToAircraftRow(
     homebase: airfield ?? null,
     icaocode: icao ?? null,
 
-    // Status: draft only if BOTH no images AND unknown manufacturer.
-    // Unknown manufacturer alone does not block publication — admin can correct it later.
-    // No images alone does not block publication — listing is still useful with description.
-    status: (uploadedImages.length === 0 && manufacturer.confidence === "low") ? "draft" : "active",
+    // Status: draft only when no images are available.
+    // Unknown manufacturer alone does not block publication — admin can correct via aircraft_reference_specs.
+    status: uploadedImages.length === 0 ? "draft" : "active",
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
@@ -1521,21 +1522,42 @@ async function detectFeatureIds(text: string): Promise<number[]> {
 /**
  * Log a draft listing to admin_activity_logs for review.
  * Admin dashboard shows these under the Activity tab.
- * Admin dashboard shows these under the Activity tab.
  */
 async function logDraftForReview(title: string, sourceId: string, guessedManufacturer: string): Promise<void> {
   try {
     await supabase.from("admin_activity_logs").insert({
-      action: "Crawler: listing saved as draft — unknown manufacturer",
+      action: "Crawler: unknown manufacturer — listing published as active, pending admin review",
       target_type: "listing",
       target_name: title.slice(0, 200),
       metadata: {
         source_id: sourceId,
         guessed_manufacturer: guessedManufacturer,
-        reason: "Manufacturer not found in DB, reference specs, or known list. Needs manual review.",
+        reason: "Manufacturer not found in DB, reference specs, or known list. Seeded into aircraft_reference_specs for future auto-resolution.",
       },
     });
   } catch {
     // Non-critical — don't fail the crawl for logging issues
+  }
+}
+
+/**
+ * Seed aircraft_reference_specs with a low-confidence placeholder for an unresolved manufacturer.
+ * On the next crawl run, the Tier 2 lookup will pick this up and auto-resolve the listing.
+ */
+async function recordUnresolvedManufacturer(title: string, hint?: string): Promise<void> {
+  try {
+    const mfgGuess = hint && hint !== "Other"
+      ? hint
+      : title.replace(/^(?:sehr\s+)?(?:schön[e]?|gut\s+|verkauf[en]+\s+)/i, "").trim().split(/\s+/).slice(0, 2).join(" ");
+    await supabase.from("aircraft_reference_specs").upsert({
+      manufacturer: mfgGuess || "Unknown",
+      model: title.trim().slice(0, 150),
+      variant: null,
+      source: "crawler-unresolved",
+      confidence: "low",
+      notes: `Auto-added by crawler: manufacturer not resolved. Title: "${title.slice(0, 200)}"`,
+    }, { onConflict: "manufacturer,model,variant", ignoreDuplicates: true });
+  } catch {
+    // Non-critical — don't fail the crawl for reference seeding issues
   }
 }
