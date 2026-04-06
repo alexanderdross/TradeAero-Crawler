@@ -437,6 +437,10 @@ function detectCategoryName(title: string, description: string, engine: string |
     return "Jet";
   }
 
+  // Military / ex-military aircraft → Experimental / Homebuilt (demilitarized, civilian-registered)
+  if (["mikoyan", "mikoyan-gurevich", "sukhoi", "yakovlev", "aero vodochody", "soko", "aermacchi"].includes(mfg)) return "Experimental / Homebuilt";
+  if (/\bmig\b|\bmig-\d|\bl-39\b|\bl-29\b|albatros\s+l-|aero\s+vodochody|galeb\b|jastreb\b|iskra\b|magister\b|cm\.?170/i.test(text)) return "Experimental / Homebuilt";
+
   // Turboprop
   if (/turboprop|pt6|king air|tbm|pc-12|pc-6|caravan|kodiak|piaggio|dornier|atr/i.test(text)) return "Turboprop";
   if (["daher", "pilatus", "quest", "piaggio", "dornier", "atr", "epic"].includes(mfg)) return "Turboprop";
