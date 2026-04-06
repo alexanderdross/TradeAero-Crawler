@@ -210,12 +210,29 @@ From the 12-agent security assessment:
 | 14 | Glider | Motorsegler, glider, TMG keywords |
 | 15 | Microlight / Flex-Wing | Paramotor, trike, flex-wing keywords |
 
-## Manufacturer Resolution (4-tier)
+## Manufacturer Resolution (5-tier)
 
-1. **DB lookup** (`aircraft_manufacturers` table) -- HIGH confidence
-2. **Reference specs** (`aircraft_reference_specs` unique manufacturers) -- HIGH confidence
-3. **KNOWN_MANUFACTURERS list** (100+ hardcoded names) -- MEDIUM confidence
-4. **Fallback** (first significant word from title) -- LOW confidence -> listing saved as **draft**
+1. **DB lookup** (`aircraft_manufacturers` table) — HIGH confidence
+2. **Reference specs** (`aircraft_reference_specs` unique manufacturers) — HIGH confidence
+3. **KNOWN_MANUFACTURERS list** (100+ hardcoded names) — MEDIUM confidence
+4. **URL hint** (manufacturer name extracted from source URL path) — MEDIUM confidence
+5. **Fallback** (`"Other"` manufacturer entry) — LOW confidence → logged to `admin_activity_logs`
+
+### Unresolved Manufacturer Handling
+When manufacturer confidence is `"low"` (Tier 5 fallback):
+- Listing is **published as active** if it has images (images alone prove content quality)
+- Listing is saved as **draft** only if it has **both** no images AND low-confidence manufacturer
+- `recordUnresolvedManufacturer()` seeds `aircraft_reference_specs` with a low-confidence placeholder. Next crawl run re-resolves the listing via Tier 2 lookup.
+- Manufacturer name guessed using language-agnostic extraction: strips common listing prefixes (DE/EN/FR/ES/NL/IT sale verbs + adjectives), takes first 1–2 capitalized tokens
+
+## Draft/Active Status Matrix
+
+| Scenario | Status |
+|----------|--------|
+| Has images + known manufacturer | active |
+| Has images + unknown manufacturer | active (manufacturer seeded for next run) |
+| No images + known manufacturer | active |
+| No images + unknown manufacturer | **draft** (genuinely incomplete) |
 
 ## Data Quality Rules
 
@@ -224,8 +241,8 @@ From the 12-agent security assessment:
 - **Description**: Must be 10+ chars after HTML stripping; falls back to title, then `"Title — Year"`; listing skipped if still too short
 - **Date prefix**: Stripped from headlines and slugs (`17.02.2025 Cessna...` -> `Cessna...`)
 - **Slugs**: DB-generated with `listing_number` suffix on INSERT; localized slugs set after
-- **Listings without images**: Saved as `draft` status
-- **Low confidence manufacturer**: Saved as `draft`, logged to `admin_activity_logs` for review
+- **Draft condition**: No images AND unknown manufacturer (both required — either alone → active)
+- **Low confidence manufacturer**: Logged to `admin_activity_logs`; `aircraft_reference_specs` seeded for auto-resolution on next crawl
 - **Constraint violations**: DB check-constraint errors (e.g. `description_check`) logged as WARN, not ERROR; listing gracefully skipped
 
 ## Aircraft Reference Specs Enrichment
@@ -339,6 +356,7 @@ Path pattern: `listings/{uuid}.jpg`
 9. **Independent workflows**: Each source has its own cron schedule and can be triggered separately
 10. **Cost tracking**: Proxy bandwidth and translation tokens tracked per run for admin visibility
 11. **Bright Data proxy**: Configurable per source; Helmut doesn't need it, aircraft24/aeromarkt do
-12. **Confidence-based publishing**: Low confidence manufacturer match -> draft status, needs admin review
-13. **Manufacturer auto-create**: New manufacturers discovered during crawling are created in aircraft_manufacturers table
-14. **Graceful constraint handling**: DB constraint violations (e.g. `description_check`) downgraded from ERROR to WARN, listing skipped without aborting the run
+12. **Image-first publishing**: Listings with images always publish as active regardless of manufacturer confidence; only no-image + no-manufacturer listings are saved as draft
+13. **Manufacturer auto-seed**: Unresolved manufacturers seeded into `aircraft_reference_specs` as low-confidence placeholders; next crawl auto-resolves via Tier 2 lookup
+14. **Manufacturer auto-create**: New manufacturers discovered during crawling are created in aircraft_manufacturers table
+15. **Graceful constraint handling**: DB constraint violations (e.g. `description_check`) downgraded from ERROR to WARN, listing skipped without aborting the run
