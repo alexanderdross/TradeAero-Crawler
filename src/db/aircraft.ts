@@ -871,9 +871,10 @@ async function mapToAircraftRow(
     homebase: airfield ?? null,
     icaocode: icao ?? null,
 
-    // Status: draft only when no images are available.
-    // Unknown manufacturer alone does not block publication — admin can correct via aircraft_reference_specs.
-    status: uploadedImages.length === 0 ? "draft" : "active",
+    // Status: draft only when BOTH no images AND unknown manufacturer.
+    // Has images → always active (manufacturer can be corrected later via aircraft_reference_specs).
+    // Known manufacturer + no images → active (spec sheets, text-only listings are valid).
+    status: (uploadedImages.length === 0 && manufacturer.confidence === "low") ? "draft" : "active",
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
