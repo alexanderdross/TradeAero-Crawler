@@ -874,7 +874,7 @@ async function mapToAircraftRow(
     // Status: draft only when BOTH no images AND unknown manufacturer.
     // Has images → always active (manufacturer can be corrected later via aircraft_reference_specs).
     // Known manufacturer + no images → active (spec sheets, text-only listings are valid).
-    status: (uploadedImages.length === 0 && manufacturer.confidence === "low") ? "draft" : "active",
+    status: ((uploadedImages ?? []).length === 0 && manufacturer.confidence === "low") ? "draft" : "active",
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
@@ -1544,14 +1544,36 @@ async function logDraftForReview(title: string, sourceId: string, guessedManufac
 /**
  * Seed aircraft_reference_specs with a low-confidence placeholder for an unresolved manufacturer.
  * On the next crawl run, the Tier 2 lookup will pick this up and auto-resolve the listing.
+ *
+ * H7: Uses a language-agnostic extraction strategy — strips common listing prefixes
+ * (sale verbs, adjectives) from multiple languages, then takes the first 1-2 capitalized words.
  */
 async function recordUnresolvedManufacturer(title: string, hint?: string): Promise<void> {
   try {
-    const mfgGuess = hint && hint !== "Other"
-      ? hint
-      : title.replace(/^(?:sehr\s+)?(?:schön[e]?|gut\s+|verkauf[en]+\s+)/i, "").trim().split(/\s+/).slice(0, 2).join(" ");
+    let mfgGuess: string;
+
+    if (hint && hint !== "Other" && hint !== "Unknown" && hint.trim().length > 0) {
+      // Use the resolved-but-low-confidence hint directly
+      mfgGuess = hint.trim();
+    } else {
+      // Language-agnostic: strip common listing prefixes (DE/EN/FR/ES/NL/IT) then take first capitalized tokens
+      const stripped = title
+        .replace(/^\s*(?:zu\s+)?(?:verkauf[en]*|vend[re]*|sell(?:ing)?|à\s+vendre|te\s+koop|in\s+vendita)\s+/i, "")
+        .replace(/^\s*(?:sehr\s+|schön[e]*\s+|gut\s+|beautiful\s+|nice\s+|excellent\s+|pristine\s+|rare\s+)/i, "")
+        .trim();
+
+      // Take first 1-2 words that start with a capital letter (likely manufacturer name)
+      const capitalWords = stripped.match(/\b[A-ZÄÖÜ][a-zA-ZäöüÄÖÜ0-9\-]+/g) ?? [];
+      mfgGuess = capitalWords.slice(0, 2).join(" ") || stripped.split(/\s+/).slice(0, 2).join(" ");
+    }
+
+    // Sanity: reject if guess is empty, too short, or looks like a number
+    if (!mfgGuess || mfgGuess.length < 2 || /^\d+$/.test(mfgGuess)) {
+      mfgGuess = "Unknown";
+    }
+
     await supabase.from("aircraft_reference_specs").upsert({
-      manufacturer: mfgGuess || "Unknown",
+      manufacturer: mfgGuess.slice(0, 100),
       model: title.trim().slice(0, 150),
       variant: null,
       source: "crawler-unresolved",
