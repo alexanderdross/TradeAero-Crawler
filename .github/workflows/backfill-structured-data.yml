@@ -1,0 +1,63 @@
+name: Backfill Structured Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max listings to process (0 = all)'
+        required: false
+        default: '0'
+      source:
+        description: 'Filter by source (helmut, aircraft24, aeromarkt, or empty for all)'
+        required: false
+        default: ''
+      retranslate:
+        description: 'Re-translate cleaned descriptions'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run (preview only, no DB writes)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ "${{ github.event.inputs.limit }}" != "0" ] && [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          if [ -n "${{ github.event.inputs.source }}" ]; then
+            ARGS="$ARGS --source ${{ github.event.inputs.source }}"
+          fi
+          if [ "${{ github.event.inputs.retranslate }}" = "true" ]; then
+            ARGS="$ARGS --retranslate"
+          fi
+          echo "Running: npx tsx src/scripts/backfill-structured-data.ts $ARGS"
+          npx tsx src/scripts/backfill-structured-data.ts $ARGS
