@@ -14,22 +14,15 @@
     "crawl:aeromarkt": "tsx src/index.ts --source aeromarkt",
     "crawl:all": "tsx src/index.ts --source helmut && tsx src/index.ts --source aircraft24 && tsx src/index.ts --source aeromarkt",
     "seed:reference-specs": "tsx src/scripts/seed-reference-specs.ts",
+    "backfill:structured-data": "tsx src/scripts/backfill-structured-data.ts",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": [
-    "aviation",
-    "crawler",
-    "scraper",
-    "tradeaero",
-    "ultralight"
-  ],
+  "keywords": ["aviation", "crawler", "scraper", "tradeaero", "ultralight"],
   "license": "UNLICENSED",
   "private": true,
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.81.0",
     "@supabase/supabase-js": "^2.49.1",
