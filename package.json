@@ -14,6 +14,7 @@
     "crawl:aeromarkt": "tsx src/index.ts --source aeromarkt",
     "crawl:all": "tsx src/index.ts --source helmut && tsx src/index.ts --source aircraft24 && tsx src/index.ts --source aeromarkt",
     "seed:reference-specs": "tsx src/scripts/seed-reference-specs.ts",
+    "backfill:structured-data": "tsx src/scripts/backfill-structured-data.ts",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
