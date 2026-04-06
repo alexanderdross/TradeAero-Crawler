@@ -370,6 +370,22 @@ function detectCategoryName(title: string, description: string, engine: string |
   const text = `${title} ${description} ${engine ?? ""}`.toLowerCase();
   const mfg = manufacturer.toLowerCase();
 
+  // ── Manufacturer-first guards (must run before keyword sweeps) ──────────────
+  // Diamond: model-specific — check before \bjet\b fires on "D-Jet" in text
+  if (mfg === "diamond" || mfg === "diamond aircraft") {
+    if (/da42|da62/i.test(text)) return "Multi Engine Piston";
+    if (/hk36|dimona/i.test(text)) return "Glider";
+    if (/d.?jet/i.test(text)) return "Jet";
+    return "Single Engine Piston";
+  }
+
+  // Beechcraft: Bonanza + Debonair = SEP; Baron/Duke/Queen Air = MEP; King Air = Turboprop
+  if (mfg === "beechcraft" || mfg === "beech") {
+    if (/king.?air|1900|200|300|350/i.test(text)) return "Turboprop";
+    if (/baron|duke|queen.?air|twin.?bonanza|travel.?air|seminole/i.test(text)) return "Multi Engine Piston";
+    return "Single Engine Piston"; // Bonanza, Debonair, Skipper, Sport, Sundowner
+  }
+
   // Helicopter / Gyrocopter
   if (/gyrocopter|tragschrauber|autogyro/i.test(text)) return "Helicopter / Gyrocopter";
   if (/hubschrauber|helicopter|heli\b/i.test(text)) return "Helicopter / Gyrocopter";
@@ -400,18 +416,21 @@ function detectCategoryName(title: string, description: string, engine: string |
   if (mfg === "scheibe") return "Glider";
 
   // Paramotors, trikes, flex-wing
-  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen|flex.?wing/i.test(text)) return "Microlight / Flex-Wing";
-  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation"].includes(mfg)) return "Microlight / Flex-Wing";
+  // Covers: German (Drachen, Gewichtsschlepper, Dreiachser synonym via "3-Achser"), French (deltaplane, aile), English
+  if (/motorschirm|paramotor|gleitschirm|paraglider|trike\b|drachen\b|flex.?wing|gewichtsschlepper|dreiachser|3.?achser|deltaplane|aile\s+delta|hang.?glider|power.?chute|speedwing|speedrider/i.test(text)) return "Microlight / Flex-Wing";
+  if (["fresh breeze", "air creation", "cosmos", "airborne", "p&m aviation", "revo", "apco", "sup'air", "ozone", "gradient", "up paragliders"].includes(mfg)) return "Microlight / Flex-Wing";
 
-  // Jets
-  if (/\bjet\b|citation|phenom|learjet|gulfstream|bombardier|challenger|falcon\b|global\s*\d/i.test(text)) {
-    if (/very light jet|vlj|sf50|eclipse|mustang/i.test(text)) return "Jet";
-    if (/light jet|cj[1-4]|phenom 100|hondajet|pc-24/i.test(text)) return "Jet";
-    if (/mid.?size|xls|latitude|hawker/i.test(text)) return "Jet";
-    if (/super mid|longitude|challenger|praetor/i.test(text)) return "Jet";
-    if (/heavy|g[5-7]\d\d|global|falcon [6-8]/i.test(text)) return "Jet";
-    if (/ultra.?long|g700|global 7/i.test(text)) return "Jet";
-    return "Jet";
+  // Jets — guard against \bjet\b firing on non-jet descriptions ("kein Jet", "wie ein Jet")
+  // Specific jet model names are unambiguous and always win
+  if (/citation|phenom|learjet|gulfstream|bombardier|challenger\s*\d|falcon\s*\d|global\s*\d|gulfstream\s*[gG]\d|embraer\s*(e|erj|phenom)/i.test(text)) return "Jet";
+  if (/very light jet|vlj|sf50|eclipse\s*\d|cj[1-4]\b|hondajet|pc-24|hawker\s*\d|xls\+?|latitude\b|longitude\b|praetor|g[5-7]\d\d\b|global\s*[5-8]|global\s*7/i.test(text)) return "Jet";
+  // Generic \bjet\b only fires for known jet manufacturers (avoids "kein Jet" in piston descriptions)
+  if (/\bjet\b/i.test(text)) {
+    const jetMfgs = ["cirrus vision", "eclipse", "hondajet", "bombardier", "gulfstream", "dassault", "learjet", "hawker", "cessna citation", "embraer phenom"];
+    if (jetMfgs.some((j) => text.includes(j))) return "Jet";
+    // Only classify as jet if a recognised jet model keyword also appears
+    if (/citation|phenom|learjet|cj[1-4]|sf50|mustang\s*(?:510|jet)|d-jet|eclipse|vision\s*jet/i.test(text)) return "Jet";
+    // Otherwise \bjet\b alone is not reliable — fall through to other detectors
   }
   if (["cirrus", "eclipse", "hondajet", "embraer", "bombardier", "gulfstream", "dassault", "learjet", "hawker"].includes(mfg)) {
     if (mfg === "cirrus" && /sr2[02]/i.test(text)) return "Single Engine Piston";
@@ -439,13 +458,6 @@ function detectCategoryName(title: string, description: string, engine: string |
 
   if (sepManufacturers.includes(mfg)) return "Single Engine Piston";
   if (experimentalManufacturers.includes(mfg)) return "Experimental / Homebuilt";
-
-  // Diamond: depends on model
-  if (mfg === "diamond") {
-    if (/da42|da62/i.test(text)) return "Multi Engine Piston";
-    if (/hk36|dimona/i.test(text)) return "Glider";
-    return "Single Engine Piston";
-  }
 
   // Default for unknown: Light Sport Aircraft (Helmut's site is UL-focused)
   return "Ultralight / Light Sport Aircraft (LSA)";
