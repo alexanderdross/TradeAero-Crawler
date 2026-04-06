@@ -56,7 +56,8 @@ Rules:
 - For hours/time, look for: TT 1549, TTAF 1549h, 235 STD SMOH, TTSN 450, Betriebsstunden 450
 - For avionics, categorize into: GPS, autopilot, radios, transponder, weather radar, TCAS, other
 - For equipment, extract items like: auxiliary fuel tanks, de-icing, oxygen system, cargo pod, floats, etc.
-- Provide a cleaned_description with ONLY narrative/marketing text, all structured data removed
+- For last_annual_inspection, return ONLY a valid ISO date (YYYY-MM-DD). If only month/year given, use the first of that month (e.g. "01.2025" → "2025-01-01"). If no clear date, omit the field entirely.
+- Provide a cleaned_description with ONLY narrative/marketing text, all structured data removed. The cleaned_description MUST be at least 20 characters long.
 - Return valid JSON only, no markdown`;
 
 export async function extractStructuredData(
@@ -104,10 +105,10 @@ Return JSON with ONLY fields you can extract. Omit fields not mentioned.
   "seats": "number",
   "registration": "if mentioned",
   "serial_number": "if mentioned",
-  "last_annual_inspection": "date or description",
+  "last_annual_inspection": "YYYY-MM-DD format ONLY",
   "maintenance_program": "program name",
   "airworthy": "yes/no",
-  "cleaned_description": "narrative text only, specs removed"
+  "cleaned_description": "narrative text only, specs removed, min 20 chars"
 }`,
       }],
     });
@@ -133,9 +134,30 @@ Return JSON with ONLY fields you can extract. Omit fields not mentioned.
       catch (err) { logger.warn("Extraction JSON parse failed", { error: String(err), title: title.slice(0, 50) }); return null; }
     }
 
+    // Validate numeric fields
     if (parsed.total_time !== undefined) parsed.total_time = Number(parsed.total_time) || undefined;
     if (parsed.engine_hours !== undefined) parsed.engine_hours = Number(parsed.engine_hours) || undefined;
     if (parsed.cycles !== undefined) parsed.cycles = Number(parsed.cycles) || undefined;
+
+    // Validate date field — must be valid ISO date (YYYY-MM-DD)
+    if (parsed.last_annual_inspection) {
+      const dateStr = parsed.last_annual_inspection.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || isNaN(Date.parse(dateStr))) {
+        // Try to parse common formats: "01.2025" → "2025-01-01", "MM/YYYY" → "YYYY-MM-01"
+        const mmYyyy = dateStr.match(/^(\d{1,2})[./](\d{4})$/);
+        if (mmYyyy) {
+          parsed.last_annual_inspection = `${mmYyyy[2]}-${mmYyyy[1].padStart(2, "0")}-01`;
+        } else {
+          // Can't parse — drop the field
+          delete parsed.last_annual_inspection;
+        }
+      }
+    }
+
+    // Validate cleaned description length
+    if (parsed.cleaned_description && parsed.cleaned_description.trim().length < 20) {
+      delete parsed.cleaned_description;
+    }
 
     logger.debug("Extracted structured data", {
       title: title.slice(0, 50),
@@ -195,7 +217,8 @@ export function applyExtractedData(record: Record<string, unknown>, extracted: E
   set("registration", extracted.registration);
   set("serial_number", extracted.serial_number);
 
-  if (extracted.cleaned_description && extracted.cleaned_description.length >= 10) {
+  // Only update description if cleaned version is long enough for DB constraint
+  if (extracted.cleaned_description && extracted.cleaned_description.trim().length >= 20) {
     record.description = extracted.cleaned_description;
   }
 }
