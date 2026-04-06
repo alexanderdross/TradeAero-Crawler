@@ -869,8 +869,10 @@ async function mapToAircraftRow(
     homebase: airfield ?? null,
     icaocode: icao ?? null,
 
-    // Status: draft if no images, unknown manufacturer, or no valid price
-    status: (uploadedImages.length === 0 || manufacturer.confidence === "low") ? "draft" : "active",
+    // Status: draft only if BOTH no images AND unknown manufacturer.
+    // Unknown manufacturer alone does not block publication — admin can correct it later.
+    // No images alone does not block publication — listing is still useful with description.
+    status: (uploadedImages.length === 0 && manufacturer.confidence === "low") ? "draft" : "active",
 
     // Specs
     total_time: listing.totalTime && listing.totalTime > 0 ? listing.totalTime : null,
