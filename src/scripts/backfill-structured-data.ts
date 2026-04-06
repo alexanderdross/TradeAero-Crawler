@@ -80,18 +80,36 @@ async function main() {
         }
       }
 
-      if (extracted.cleaned_description && extracted.cleaned_description.length >= 10 &&
-          extracted.cleaned_description.length < description.length * 0.9) {
-        updateFields.description = extracted.cleaned_description;
+      // Only update description if cleaned version passes DB constraint (>= 10 chars)
+      // and is meaningfully shorter than the original (not just whitespace trimming)
+      const cleanedDesc = extracted.cleaned_description;
+      if (cleanedDesc && cleanedDesc.trim().length >= 20 &&
+          cleanedDesc.length < description.length * 0.9) {
+        updateFields.description = cleanedDesc;
+
+        // Re-translate with cleaned description if requested
         if (opts.retranslate && process.env.ANTHROPIC_API_KEY) {
           try {
-            const translations = await translateListing(headline, extracted.cleaned_description, "de");
-            if (translations) Object.assign(updateFields, buildLocaleFields(headline, extracted.cleaned_description, translations));
+            const translations = await translateListing(headline, cleanedDesc, "de");
+            if (translations) {
+              const localeFields = buildLocaleFields(headline, cleanedDesc, translations);
+              // Only include description_* and headline_* locale fields
+              // NEVER include slug_* fields — they have unique constraints
+              for (const [key, val] of Object.entries(localeFields)) {
+                if (key.startsWith("slug_")) continue;
+                updateFields[key] = val;
+              }
+            }
           } catch (err) { logger.warn(`Re-translation failed for ${listing.id}: ${err}`); }
         }
       }
 
       if (Object.keys(updateFields).length === 0) { skipped++; continue; }
+
+      // Final safety: strip any slug fields that might have leaked through
+      for (const key of Object.keys(updateFields)) {
+        if (key.startsWith("slug")) delete updateFields[key];
+      }
 
       logger.info(`[${i+1}/${listings.length}] ${headline.slice(0, 50)} — filling ${Object.keys(updateFields).length} fields`);
 
