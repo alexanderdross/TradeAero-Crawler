@@ -66,7 +66,8 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
       logger.info(`Fetched ${url}`, { bytes: html.length, attempt, proxy: useProxy });
       return html;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const rawMsg = error instanceof Error ? error.message : String(error);
+      const msg = redactProxyUrl(rawMsg);
       logger.warn(`Fetch attempt ${attempt}/${maxRetries} failed for ${url}`, { error: msg, proxy: useProxy });
 
       if (attempt === maxRetries) {
@@ -132,6 +133,11 @@ function trackProxyBytes(bytes: number): void {
 
 function getProxyUrl(): string | null {
   return process.env.BRIGHT_DATA_PROXY_URL || null;
+}
+
+/** Strip credentials from URLs before logging (CWE-532) */
+export function redactProxyUrl(url: string): string {
+  return url.replace(/\/\/[^:]+:[^@]+@/, "//***@");
 }
 
 /** Polite delay between requests */

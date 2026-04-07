@@ -75,6 +75,10 @@ export async function uploadImages(
   const results: Array<{ url: string; alt_text: string }> = [];
 
   for (let i = 0; i < imageUrls.length; i += MAX_CONCURRENT) {
+    // Polite delay between batches to avoid overwhelming source servers
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
     const batch = imageUrls.slice(i, i + MAX_CONCURRENT);
     const batchResults = await Promise.allSettled(
       batch.map((url) => downloadAndUpload(url, altText, bucket))
