@@ -112,6 +112,13 @@ async function crawlAircraft24Aircraft(): Promise<CrawlResult> {
       }
     }
 
+    const warnings: string[] = [];
+    if (listingsFound === 0 && errors.length === 0) {
+      const warn = `[CRAWLER] WARNING: 0 listings parsed from ${src.name} - possible site structure change`;
+      logger.warn(warn);
+      warnings.push(warn);
+    }
+
     if (dbRunId) {
       const tokens = getTranslationTokenUsage();
       await completeCrawlRun(dbRunId, {
@@ -120,7 +127,7 @@ async function crawlAircraft24Aircraft(): Promise<CrawlResult> {
         imagesUploaded: listingsInserted, translationsCompleted: listingsInserted + listingsUpdated,
         proxyBytesTransferred: getProxyBytesTransferred(),
         translationInputTokens: tokens.input, translationOutputTokens: tokens.output,
-      }, startTime);
+      }, startTime, warnings);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
