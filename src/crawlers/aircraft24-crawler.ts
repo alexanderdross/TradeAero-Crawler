@@ -78,16 +78,20 @@ async function crawlAircraft24Aircraft(): Promise<CrawlResult> {
     logger.info(`Discovered ${allModelUrls.length} model pages`, { source: src.name });
 
     // Step 2: Crawl each model page (with pagination)
+    const MAX_PAGES = 50; // Safety limit for total pagination across all models
+    let totalPageCount = 0;
+
     for (const modelUrl of allModelUrls) {
       let currentUrl: string | null = modelUrl;
       let pageCount = 0;
-      const maxPages = 10; // Safety limit per model
+      const maxPagesPerModel = 10; // Safety limit per model
 
-      while (currentUrl && pageCount < maxPages) {
+      while (currentUrl && pageCount < maxPagesPerModel && totalPageCount < MAX_PAGES) {
         try {
           const html = await fetchPage(currentUrl, { proxy: src.useProxy });
           pagesProcessed++;
           pageCount++;
+          totalPageCount++;
 
           const { listings, nextPageUrl } = parseAircraft24ModelPage(html, currentUrl, src.name);
           listingsFound += listings.length;
@@ -109,6 +113,11 @@ async function crawlAircraft24Aircraft(): Promise<CrawlResult> {
           logger.error("Failed to crawl aircraft24 model page", { url: currentUrl, error: msg });
           currentUrl = null; // Stop pagination on error
         }
+      }
+
+      if (totalPageCount >= MAX_PAGES) {
+        logger.warn(`Reached MAX_PAGES limit (${MAX_PAGES}), stopping pagination`, { source: src.name });
+        break;
       }
     }
 

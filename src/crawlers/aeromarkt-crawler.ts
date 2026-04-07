@@ -47,16 +47,20 @@ async function crawlAeromarktAircraft(): Promise<CrawlResult> {
   try {
     const systemUserId = await getSystemUserId();
 
+    const MAX_PAGES = 50;
+    let totalPageCount = 0;
+
     for (const categoryUrl of src.aircraft) {
       let currentUrl: string | null = categoryUrl;
       let pageCount = 0;
-      const maxPages = 20;
 
-      while (currentUrl && pageCount < maxPages) {
+      while (currentUrl && pageCount < 20 && totalPageCount < MAX_PAGES) {
         try {
           const html = await fetchPage(currentUrl, { proxy: src.useProxy });
           pagesProcessed++;
           pageCount++;
+
+          totalPageCount++;
 
           const { listings, nextPageUrl } = parseAeromarktAircraftPage(html, currentUrl, src.name);
           listingsFound += listings.length;
@@ -90,6 +94,11 @@ async function crawlAeromarktAircraft(): Promise<CrawlResult> {
           logger.error("Failed to crawl aeromarkt aircraft page", { url: currentUrl, error: msg });
           currentUrl = null;
         }
+      }
+
+      if (totalPageCount >= MAX_PAGES) {
+        logger.warn(`Reached MAX_PAGES limit (${MAX_PAGES}), stopping pagination`, { source: src.name });
+        break;
       }
     }
 
@@ -140,16 +149,19 @@ async function crawlAeromarktParts(): Promise<CrawlResult> {
   try {
     const systemUserId = await getSystemUserId();
 
+    const MAX_PAGES = 50;
+    let totalPageCount = 0;
+
     for (const categoryUrl of src.parts) {
       let currentUrl: string | null = categoryUrl;
       let pageCount = 0;
-      const maxPages = 20;
 
-      while (currentUrl && pageCount < maxPages) {
+      while (currentUrl && pageCount < 20 && totalPageCount < MAX_PAGES) {
         try {
           const html = await fetchPage(currentUrl, { proxy: src.useProxy });
           pagesProcessed++;
           pageCount++;
+          totalPageCount++;
 
           const { listings, nextPageUrl } = parseAeromarktPartsPage(html, currentUrl, src.name);
           listingsFound += listings.length;
@@ -171,6 +183,11 @@ async function crawlAeromarktParts(): Promise<CrawlResult> {
           logger.error("Failed to crawl aeromarkt parts page", { url: currentUrl, error: msg });
           currentUrl = null;
         }
+      }
+
+      if (totalPageCount >= MAX_PAGES) {
+        logger.warn(`Reached MAX_PAGES limit (${MAX_PAGES}), stopping pagination`, { source: src.name, target: "parts" });
+        break;
       }
     }
 

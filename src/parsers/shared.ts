@@ -102,7 +102,7 @@ export function extractPriceFromText(text: string): { amount: number | null; neg
   const priceMatch =
     text.match(/(?:Preis|€|EUR)\s*:?\s*([\d.,]+)\s*(?:€|EUR)?\s*,?-?\s*(VB|VHB|FP)?/i) ??
     text.match(/€\s*([\d.,]+)\s*,?-?\s*(VB|VHB|FP)?/i) ??
-    text.match(/([\d.]+)\s*(?:€|EUR)\s*(VB|VHB|FP)?/i);
+    text.match(/([\d.,]{2,})\s*(?:€|EUR)\s*(VB|VHB|FP)?/i);
 
   if (priceMatch) {
     const result = parsePrice(`€${priceMatch[1]} ${priceMatch[2] ?? ""}`);
