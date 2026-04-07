@@ -45,6 +45,14 @@ export function generateSlug(text: string, listingNumber?: number): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 
+  // Avoid cutting mid-word: truncate at last hyphen if within last 20 chars
+  if (slug.length === 80) {
+    const lastHyphen = slug.lastIndexOf("-");
+    if (lastHyphen >= 60) {
+      slug = slug.slice(0, lastHyphen);
+    }
+  }
+
   if (listingNumber) {
     slug = `${slug}-${listingNumber}`;
   }

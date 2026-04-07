@@ -56,31 +56,35 @@ async function main(): Promise<void> {
 }
 
 function parseSource(): Source {
+  const validSources: Source[] = ["helmut", "aircraft24", "aeromarkt"];
   const arg = process.argv.find((a) => a.startsWith("--source"));
   if (!arg) return "helmut";
 
   const value = arg.includes("=") ? arg.split("=")[1] : process.argv[process.argv.indexOf(arg) + 1];
 
-  if (value === "helmut" || value === "aircraft24" || value === "aeromarkt") {
-    return value;
+  if (validSources.includes(value as Source)) {
+    return value as Source;
   }
 
-  logger.warn(`Unknown source "${value}", defaulting to "helmut"`);
-  return "helmut";
+  logger.error(`Invalid source "${value}". Valid sources: ${validSources.join(", ")}`);
+  process.exit(1);
+  return "helmut" as never;
 }
 
 function parseTarget(): Target {
+  const validTargets: Target[] = ["all", "aircraft", "parts"];
   const arg = process.argv.find((a) => a.startsWith("--target"));
   if (!arg) return "all";
 
   const value = arg.includes("=") ? arg.split("=")[1] : process.argv[process.argv.indexOf(arg) + 1];
 
-  if (value === "aircraft" || value === "parts" || value === "all") {
-    return value;
+  if (validTargets.includes(value as Target)) {
+    return value as Target;
   }
 
-  logger.warn(`Unknown target "${value}", defaulting to "all"`);
-  return "all";
+  logger.error(`Invalid target "${value}". Valid targets: ${validTargets.join(", ")}`);
+  process.exit(1);
+  return "all" as never;
 }
 
 function timeDiff(start: string, end: string): string {
