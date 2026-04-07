@@ -202,9 +202,9 @@ export function extractLocation(text: string): string | null {
   }
 
   // German postal code + city: "86150 Augsburg", "86150 Bad Aibling"
-  // Extra words must start with uppercase to avoid capturing lowercase description text
-  // Case-insensitive flag handles city names with non-standard casing (e.g. "augsburg", "AUGSBURG")
-  const postalMatch = text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ][a-zäöüß]+){0,2})/i);
+  // City name must start with uppercase letter to avoid capturing lowercase description
+  // words. No `i` flag here — uppercase-first is intentional for free-text disambiguation.
+  const postalMatch = text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ][a-zäöüß]+){0,2})/);
   if (postalMatch) {
     return cleanText(`${postalMatch[1]} ${postalMatch[2]}`);
   }
