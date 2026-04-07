@@ -147,8 +147,12 @@ describe("extractCity", () => {
     expect(extractCity(null)).toBeNull();
   });
 
-  it("returns null for short lowercase text", () => {
-    expect(extractCity("ab")).toBeNull();
+  it("returns null for single-char text", () => {
+    expect(extractCity("a")).toBeNull();
+  });
+
+  it("handles lowercase city names", () => {
+    expect(extractCity("münchen")).toBe("münchen");
   });
 });
 
