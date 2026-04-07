@@ -144,7 +144,7 @@ export function extractContact(
   // Name: try to find before contact details
   let name: string | null = null;
   const nameMatch = text.match(
-    /(?:Kontakt|Ansprechpartner|Verkäufer)[:\s]*([A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+)/
+    /(?:Kontakt|Ansprechpartner|Verkäufer)[:\s]*([A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+)/i
   );
   if (nameMatch) name = nameMatch[1];
 
@@ -202,7 +202,8 @@ export function extractLocation(text: string): string | null {
   }
 
   // German postal code + city: "86150 Augsburg", "86150 Bad Aibling"
-  // Extra words must start with uppercase to avoid capturing lowercase description text
+  // City name must start with uppercase letter to avoid capturing lowercase description
+  // words. No `i` flag here — uppercase-first is intentional for free-text disambiguation.
   const postalMatch = text.match(/(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:[\s-][A-ZÄÖÜ][a-zäöüß]+){0,2})/);
   if (postalMatch) {
     return cleanText(`${postalMatch[1]} ${postalMatch[2]}`);
@@ -230,8 +231,9 @@ export function extractCity(location: string | null): string | null {
   // Take first word/phrase (stop at slash, dash with spaces, or parentheses)
   city = city.split(/\s*[/()]\s*/)[0].trim();
 
-  // Must be at least 2 chars and start with uppercase
-  if (city.length >= 2 && /^[A-ZÄÖÜ]/.test(city)) {
+  // Must be at least 2 chars and start with a letter (case-insensitive to
+  // handle city names with non-standard casing)
+  if (city.length >= 2 && /^[A-ZÄÖÜa-zäöü]/i.test(city)) {
     return city;
   }
 
