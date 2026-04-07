@@ -111,8 +111,17 @@ WHERE manufacturer IN ('Pitts', 'XtremeAir', 'Sukhoi', 'Yakovlev', 'Cap Aviation
    OR (manufacturer = 'Sonex');
 
 -- Trikes / Paramotors → Microlight / Flex-Wing
+-- NOTE: Only genuine trike/paramotor/flex-wing manufacturers belong here.
+-- Eagle and Fascination are fixed-wing ULs, NOT flex-wings — they go to LSA.
 UPDATE public.aircraft_reference_specs SET category = 'Microlight / Flex-Wing'
-WHERE manufacturer IN ('Air Creation', 'P&M Aviation', 'Cosmos', 'Airborne', 'Fresh Breeze');
+WHERE manufacturer IN ('Air Creation', 'P&M Aviation', 'Cosmos', 'Airborne', 'Fresh Breeze',
+  'Royal', 'Take Off', 'Bautek', 'Diamant', 'La Mouette', 'Drachenflieger',
+  'Sunflightcraft', 'Parazoom', 'Flylight', 'Air Création');
+
+-- Fix manufacturers incorrectly in Microlight that are actually UL/LSA fixed-wing
+UPDATE public.aircraft_reference_specs SET category = 'Light Sport Aircraft'
+WHERE manufacturer IN ('Fascination', 'Eagle')
+  AND (category IS NULL OR category = 'Microlight / Flex-Wing');
 
 -- Gliders / Motorgliders → Glider
 UPDATE public.aircraft_reference_specs SET category = 'Glider'

@@ -813,7 +813,8 @@ const MODELS = [
   // Take Off (German trikes)
   { manufacturer: "Take Off", model: "Merlin", variant: "1000" },
   { manufacturer: "Take Off", model: "Merlin", variant: "1200" },
-  // Eagle (trikes)
+  // Eagle (UL fixed-wing and trikes)
+  { manufacturer: "Eagle", model: "Eagle", variant: null },
   { manufacturer: "Eagle", model: "Eagle V", variant: "Trike" },
   // Bautek (German trikes)
   { manufacturer: "Bautek", model: "Pico", variant: null },
