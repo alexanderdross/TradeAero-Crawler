@@ -295,6 +295,19 @@ const MODELS = [
   { manufacturer: "Bell", model: "505", variant: "Jet Ranger X" },
   { manufacturer: "Leonardo", model: "AW109", variant: "Trekker" },
   { manufacturer: "Leonardo", model: "AW169", variant: null },
+  // Agusta / AgustaWestland legacy names (rebranded to Leonardo in 2016)
+  // These entries ensure category lookup works for listings using the old name
+  { manufacturer: "Agusta", model: "A109", variant: null },
+  { manufacturer: "Agusta", model: "A119", variant: "Koala" },
+  { manufacturer: "AgustaWestland", model: "AW109", variant: null },
+  { manufacturer: "AgustaWestland", model: "AW119", variant: null },
+  { manufacturer: "AgustaWestland", model: "AW139", variant: null },
+  // Eurocopter legacy names (rebranded to Airbus Helicopters in 2014)
+  { manufacturer: "Eurocopter", model: "EC120", variant: "Colibri" },
+  { manufacturer: "Eurocopter", model: "EC130", variant: null },
+  { manufacturer: "Eurocopter", model: "EC135", variant: null },
+  { manufacturer: "Eurocopter", model: "EC145", variant: null },
+  { manufacturer: "Eurocopter", model: "AS350", variant: "Ecureuil" },
   { manufacturer: "MD Helicopters", model: "MD 500", variant: "E" },
   { manufacturer: "MD Helicopters", model: "MD 530F", variant: null },
   { manufacturer: "Guimbal", model: "Cabri G2", variant: null },
