@@ -12,6 +12,42 @@ import { stripTitleDatePrefix } from "../parsers/shared.js";
 let manufacturerCache: Map<string, number> | null = null;
 let refSpecManufacturers: string[] | null = null;
 
+/**
+ * Map legacy / alternate manufacturer names to the canonical name used in
+ * aircraft_reference_specs.  When a listing title contains an alias (left),
+ * we resolve it to the canonical name (right) so that category lookup and
+ * reference-spec enrichment work correctly.
+ *
+ * Sorted longest-first so "AgustaWestland" matches before "Agusta".
+ */
+const MANUFACTURER_ALIASES: Record<string, string> = {
+  // AgustaWestland → rebranded to Leonardo Helicopters in 2016
+  "agustawestland": "Leonardo",
+  "agusta westland": "Leonardo",
+  "agusta": "Leonardo",
+  // Eurocopter → rebranded to Airbus Helicopters in 2014
+  "eurocopter": "Airbus Helicopters",
+  // MBB → merged into Eurocopter, now Airbus Helicopters
+  "mbb": "Airbus Helicopters",
+  // Aerospatiale helicopters → Airbus Helicopters
+  "aerospatiale": "Airbus Helicopters",
+  // Sikorsky alternate
+  "sikorski": "Sikorsky",
+  // Hawker Beechcraft → split into Beechcraft (pistons) and Hawker (jets)
+  "hawker beechcraft": "Beechcraft",
+  // Daher-Socata → Daher acquired Socata
+  "daher-socata": "Daher",
+  "daher socata": "Daher",
+  // De Havilland alternate spellings
+  "dehavilland": "De Havilland",
+  "de havilland canada": "De Havilland",
+  // Vulcanair ← Partenavia
+  "partenavia": "Vulcanair",
+};
+
+/** Sorted alias keys longest-first for greedy matching */
+const ALIAS_KEYS = Object.keys(MANUFACTURER_ALIASES).sort((a, b) => b.length - a.length);
+
 async function loadRefSpecManufacturers(): Promise<string[]> {
   if (refSpecManufacturers) return refSpecManufacturers;
   const { data } = await (supabase as any).from("aircraft_reference_specs").select("manufacturer");
@@ -28,8 +64,15 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
 }
 
 async function resolveManufacturer(title: string): Promise<string | null> {
-  const manufacturers = await loadRefSpecManufacturers();
   const lower = title.toLowerCase();
+
+  // 1. Check manufacturer aliases first (handles rebrands like Agusta → Leonardo)
+  for (const alias of ALIAS_KEYS) {
+    if (lower.includes(alias)) return MANUFACTURER_ALIASES[alias];
+  }
+
+  // 2. Match against reference-spec manufacturer names
+  const manufacturers = await loadRefSpecManufacturers();
   for (const m of manufacturers) { if (lower.includes(m.toLowerCase())) return m; }
   return null;
 }
