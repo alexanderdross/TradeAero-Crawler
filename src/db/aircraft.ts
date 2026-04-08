@@ -2,7 +2,7 @@ import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
 import { uploadImages } from "../utils/images.js";
 import { translateListing, type TranslationResult } from "../utils/translate.js";
-import { extractStructuredData, applyExtractedData } from "../utils/extract.js";
+import { extractStructuredData, applyExtractedData, deduplicateDescription } from "../utils/extract.js";
 import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import { lookupReferenceSpecs, applyReferenceSpecs, lookupCategoryFromRefSpecs } from "./reference-specs.js";
@@ -43,6 +43,14 @@ const MANUFACTURER_ALIASES: Record<string, string> = {
   "de havilland canada": "De Havilland",
   // Vulcanair ← Partenavia
   "partenavia": "Vulcanair",
+  // Short-name aliases → canonical names for consistent DB entries
+  "ikarus": "Comco Ikarus",
+  "comco ikarus": "Comco Ikarus",
+  "fk9": "FK Lightplanes",
+  "fk14": "FK Lightplanes",
+  "fk lightplanes": "FK Lightplanes",
+  "i.c.p": "ICP",
+  // Robinson vs Robin disambiguation handled in resolveManufacturer()
 };
 
 /** Sorted alias keys longest-first for greedy matching */
@@ -66,6 +74,14 @@ async function getManufacturerMap(): Promise<Map<string, number>> {
 async function resolveManufacturer(title: string): Promise<string | null> {
   const lower = title.toLowerCase();
 
+  // 0. Robin vs Robinson disambiguation — Robinson helicopter models (R22, R44, R66)
+  //    contain "robin" as substring, so we must check Robinson first.
+  if (/\b(robinson|r[\s-]?22|r[\s-]?44|r[\s-]?66)\b/i.test(title)) {
+    // If title contains Robinson helicopter model indicators → Robinson
+    if (/\b(r[\s-]?22|r[\s-]?44|r[\s-]?66)\b/i.test(title)) return "Robinson";
+    if (lower.includes("robinson")) return "Robinson";
+  }
+
   // 1. Check manufacturer aliases first (handles rebrands like Agusta → Leonardo)
   for (const alias of ALIAS_KEYS) {
     if (lower.includes(alias)) return MANUFACTURER_ALIASES[alias];
@@ -75,6 +91,74 @@ async function resolveManufacturer(title: string): Promise<string | null> {
   const manufacturers = await loadRefSpecManufacturers();
   for (const m of manufacturers) { if (lower.includes(m.toLowerCase())) return m; }
   return null;
+}
+
+/**
+ * Extract a clean model name from the listing title by removing the
+ * manufacturer name and filtering out garbage tokens (engine names,
+ * registrations, prices, German listing metadata).
+ *
+ * If a reference spec match exists, prefer its clean model name.
+ */
+function extractModelFromTitle(
+  title: string,
+  manufacturerName: string | null,
+  refSpecs: { ref_model?: string; ref_variant?: string } | null,
+): string {
+  // 1. Prefer model from reference specs (cleanest source)
+  if (refSpecs?.ref_model) {
+    const variant = refSpecs.ref_variant;
+    return variant ? `${refSpecs.ref_model} ${variant}` : refSpecs.ref_model;
+  }
+
+  // 2. Extract from title: remove manufacturer name, then clean up
+  let model = title;
+  if (manufacturerName) {
+    // Remove manufacturer name (case-insensitive)
+    model = model.replace(new RegExp(manufacturerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), "").trim();
+  }
+
+  // Remove common German listing prefixes
+  model = model
+    .replace(/^(zu\s+)?verkauf[e]?\s*[:.]?\s*/i, "")
+    .replace(/^(for\s+)?sale\s*[:.]?\s*/i, "")
+    .replace(/^angeboten\s+wird\s*/i, "")
+    .replace(/^verkaufe\s*[:.]?\s*/i, "")
+    .replace(/^biete\s*[:.]?\s*/i, "")
+    .trim();
+
+  // Take only the first meaningful segment (before description starts)
+  // Split on common delimiters: Baujahr, Betriebsstunden, Motor:, year patterns
+  model = model.split(/\s+(?:Baujahr|BJ\.?|Betriebsstunden|TT:|TTAF|Motor:|Standort|Zustand|Preis|EUR|€|\d{2}\.\d{2}\.\d{4})/i)[0].trim();
+
+  // Remove trailing punctuation and whitespace
+  model = model.replace(/[\s,;:.!]+$/, "").trim();
+
+  // Reject if result is garbage
+  if (!isCleanModel(model)) return title.slice(0, 60).trim();
+
+  // Cap length
+  return model.slice(0, 80);
+}
+
+/** Check if a model string is clean (not engine name, registration, price, etc.) */
+function isCleanModel(model: string): boolean {
+  if (!model || model.length < 2) return false;
+  // Engine names
+  if (/^(rotax|lycoming|continental|jabiru|hirth|polini|bmw)\b/i.test(model)) return false;
+  // Engine patterns: "912 ULS", "912S", "582"
+  if (/^(912|914|582|503|447)\b/i.test(model)) return false;
+  // Registration numbers: D-MXXX, D-EXXX, HB-XXX, OE-XXX
+  if (/^[A-Z]{1,2}-[A-Z]{2,4}/i.test(model)) return false;
+  // Pure price: "26.000", "12500"
+  if (/^\d{1,3}([.,]\d{3})*\s*(€|EUR|,-)?$/i.test(model)) return false;
+  // Contains email
+  if (/@/.test(model)) return false;
+  // Too many words (likely description fragment)
+  if (model.split(/\s+/).length > 6) return false;
+  // Known garbage keywords
+  if (/\b(zustand|verkauf|baujahr|stunden|preis|motor\b|biete|kaufe|gesucht|aufgabe)/i.test(model)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +228,9 @@ export async function upsertAircraftListing(
 
     const refSpecs = await lookupReferenceSpecs(cleanTitle, listing.description ?? "", listing.engine ?? null);
 
+    // Extract clean model name from title (prefers reference spec match)
+    const modelName = extractModelFromTitle(cleanTitle, manufacturerName, refSpecs as any);
+
     const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName);
     const categoryId = detectedCategoryName ? await getCategoryId(detectedCategoryName) : null;
 
@@ -157,8 +244,9 @@ export async function upsertAircraftListing(
     // Extract structured data from description
     const extracted = await extractStructuredData(cleanTitle, listing.description ?? "");
 
-    // Use cleaned description for translation (specs removed)
-    const descForTranslation = extracted?.cleaned_description ?? listing.description ?? "";
+    // Use cleaned description for translation (specs removed, deduplicated)
+    const rawDesc = extracted?.cleaned_description ?? listing.description ?? "";
+    const descForTranslation = deduplicateDescription(rawDesc);
 
     // Translations
     let translations: TranslationResult | null = null;
@@ -176,6 +264,7 @@ export async function upsertAircraftListing(
     const record: Record<string, unknown> = {
       user_id: systemUserId,
       headline: cleanTitle,
+      model: modelName,
       description: descForTranslation,
       year: listing.year ?? null,
       price: listing.price ?? null,
