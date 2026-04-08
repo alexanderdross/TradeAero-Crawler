@@ -29,6 +29,10 @@ vi.mock("../utils/extract.js", () => ({
   deduplicateDescription: vi.fn().mockImplementation((text: string) => text),
 }));
 
+vi.mock("../parsers/shared.js", () => ({
+  stripTitleDatePrefix: vi.fn().mockImplementation((title: string) => title),
+}));
+
 vi.mock("../db/reference-specs.js", () => ({
   lookupReferenceSpecs: vi.fn().mockResolvedValue(null),
   applyReferenceSpecs: vi.fn(),
