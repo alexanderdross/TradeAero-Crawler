@@ -194,6 +194,85 @@ async function detectCategoryName(sourceUrl: string | undefined, title: string, 
   return detectCategoryFromUrlAndTitle(sourceUrl, title);
 }
 
+// ---------------------------------------------------------------------------
+// City / country validation — prevents country names in city field,
+// strips ICAO codes, airport prefixes, and garbage keywords.
+// ---------------------------------------------------------------------------
+
+/** Country names in German + English (lowercase for matching) */
+const COUNTRY_NAMES = new Set([
+  "germany", "deutschland", "france", "frankreich", "spain", "spanien",
+  "italy", "italien", "austria", "österreich", "oesterreich",
+  "switzerland", "schweiz", "netherlands", "niederlande", "holland",
+  "belgium", "belgien", "poland", "polen", "czech republic", "tschechien",
+  "sweden", "schweden", "norway", "norwegen", "denmark", "dänemark",
+  "portugal", "greece", "griechenland", "turkey", "türkei",
+  "united kingdom", "uk", "usa", "united states", "canada", "kanada",
+  "hungary", "ungarn", "romania", "rumänien", "croatia", "kroatien",
+  "slovakia", "slowakei", "slovenia", "slowenien", "bulgaria", "bulgarien",
+]);
+
+/** Words that are NOT city names */
+const INVALID_CITY_WORDS = new Set([
+  "factory", "available", "maintenance", "man", "flugplatz", "airport",
+  "hangar", "lagerung", "werkstatt", "museum", "studio", "office",
+  "base", "depot", "storage",
+]);
+
+/** German → English country name mapping */
+const COUNTRY_MAP: Record<string, string> = {
+  "deutschland": "Germany", "frankreich": "France", "spanien": "Spain",
+  "italien": "Italy", "österreich": "Austria", "oesterreich": "Austria",
+  "schweiz": "Switzerland", "niederlande": "Netherlands", "holland": "Netherlands",
+  "belgien": "Belgium", "polen": "Poland", "tschechien": "Czech Republic",
+  "schweden": "Sweden", "norwegen": "Norway", "dänemark": "Denmark",
+  "griechenland": "Greece", "türkei": "Turkey", "ungarn": "Hungary",
+  "rumänien": "Romania", "kroatien": "Croatia", "slowakei": "Slovakia",
+  "slowenien": "Slovenia", "bulgarien": "Bulgaria", "kanada": "Canada",
+};
+
+function cleanCity(city: string | null, country: string | null): string | null {
+  if (!city) return null;
+  let cleaned = city.trim();
+  if (!cleaned) return null;
+
+  // If city is a country name, return null
+  if (COUNTRY_NAMES.has(cleaned.toLowerCase())) return null;
+
+  // Strip country prefix: "Deutschland, Grefrath" → "Grefrath"
+  const commaMatch = cleaned.match(/^(?:Deutschland|Italien|Frankreich|Spanien|Schweiz|Österreich|Germany|Italy|France|Spain|Switzerland|Austria),\s*(.+)$/i);
+  if (commaMatch) cleaned = commaMatch[1].trim();
+
+  // Strip ICAO code suffix: "Kapfenberg LOGK" → "Kapfenberg"
+  const icaoMatch = cleaned.match(/^(.+?)\s+([A-Z]{4})$/);
+  if (icaoMatch && /^(ED|LO|LS|LF|LE|LI|EH|EB|EP|LK|ES|EN|EK|LG|LT|LH|LR|LD)/.test(icaoMatch[2])) {
+    cleaned = icaoMatch[1].trim();
+  }
+
+  // Strip airport prefix: "Flugplatz Bonn-Hangelar" → "Bonn-Hangelar"
+  cleaned = cleaned.replace(/^(?:Flugplatz|Flughafen|Airport|Airfield)\s+/i, "").trim();
+
+  // Strip trailing garbage: "Magdeburg Lagerung Hangar" → "Magdeburg"
+  cleaned = cleaned.replace(/\s+(?:Lagerung|Hangar|Unfall|Werkstatt|Museum).*$/i, "").trim();
+
+  // Reject invalid city names
+  if (INVALID_CITY_WORDS.has(cleaned.toLowerCase())) return null;
+  if (cleaned.length < 2 || cleaned.length > 50) return null;
+  if (/^\d+$/.test(cleaned)) return null;
+
+  return cleaned;
+}
+
+function cleanCountry(country: string | null): string | null {
+  if (!country) return null;
+  const lower = country.trim().toLowerCase();
+  // Map German country names to English
+  if (COUNTRY_MAP[lower]) return COUNTRY_MAP[lower];
+  // Already English
+  if (COUNTRY_NAMES.has(lower)) return country.trim();
+  return country.trim();
+}
+
 let categoryCache: Map<string, number> | null = null;
 async function getCategoryId(name: string): Promise<number | null> {
   if (!categoryCache) {
@@ -274,8 +353,8 @@ export async function upsertAircraftListing(
       engine_hours: listing.engineHours ?? null,
       engine_type_name: listing.engine ?? null,
       location: listing.location ?? null,
-      country: listing.country ?? "Germany",
-      city: listing.city ?? null,
+      country: cleanCountry(listing.country) ?? "Germany",
+      city: cleanCity(listing.city, listing.country) ?? null,
       icaocode: listing.icaoCode ?? null,
       registration: listing.registration ?? null,
       serial_number: listing.serialNumber ?? null,
