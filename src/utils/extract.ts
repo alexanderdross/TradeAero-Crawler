@@ -43,6 +43,7 @@ export interface ExtractedListingData {
   country?: string;
   city?: string;
   location?: string;
+  icaocode?: string;
   contact_name?: string;
   contact_email?: string;
   contact_phone?: string;
@@ -180,6 +181,7 @@ Return JSON with ONLY fields you can extract. Omit fields not mentioned.
   "airworthy": "yes or no",
   "country": "country name in English (e.g. Germany, Pakistan, Switzerland)",
   "city": "city or region name",
+  "icaocode": "ICAO airport code where aircraft is based (4 uppercase letters, e.g. LOGK, EDNY, LSZH, LOWW). Look for: Standort, based at, homebase, Flugplatz, ICAO",
   "location": "full location string (e.g. Middle East, Lahore Pakistan)",
   "contact_name": "contact person name",
   "contact_email": "email address",
@@ -323,6 +325,7 @@ export function applyExtractedData(record: Record<string, unknown>, extracted: E
   // Location (only fill if not already set from parser)
   set("country", extracted.country);
   set("city", extracted.city);
+  set("icaocode", extracted.icaocode);
   if (extracted.location && !record.location) {
     record.location = extracted.location;
   }
