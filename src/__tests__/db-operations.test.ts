@@ -26,6 +26,7 @@ vi.mock("../utils/translate.js", () => ({
 vi.mock("../utils/extract.js", () => ({
   extractStructuredData: vi.fn().mockResolvedValue(null),
   applyExtractedData: vi.fn(),
+  deduplicateDescription: vi.fn().mockImplementation((text: string) => text),
 }));
 
 vi.mock("../db/reference-specs.js", () => ({
