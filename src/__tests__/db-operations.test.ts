@@ -30,7 +30,9 @@ vi.mock("../utils/extract.js", () => ({
 }));
 
 vi.mock("../parsers/shared.js", () => ({
-  stripTitleDatePrefix: vi.fn().mockImplementation((title: string) => title),
+  stripTitleDatePrefix: vi.fn().mockImplementation((title: string) =>
+    title.replace(/^\d{1,2}\.\d{1,2}\.\d{4}\s+/, "")
+  ),
 }));
 
 vi.mock("../db/reference-specs.js", () => ({
