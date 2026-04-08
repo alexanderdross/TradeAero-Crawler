@@ -2,7 +2,7 @@ import { supabase } from "./client.js";
 import { logger } from "../utils/logger.js";
 import { uploadImages } from "../utils/images.js";
 import { translateListing, type TranslationResult } from "../utils/translate.js";
-import { extractStructuredData, applyExtractedData } from "../utils/extract.js";
+import { extractStructuredData, applyExtractedData, deduplicateDescription } from "../utils/extract.js";
 import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import { lookupReferenceSpecs, applyReferenceSpecs, lookupCategoryFromRefSpecs } from "./reference-specs.js";
@@ -244,8 +244,9 @@ export async function upsertAircraftListing(
     // Extract structured data from description
     const extracted = await extractStructuredData(cleanTitle, listing.description ?? "");
 
-    // Use cleaned description for translation (specs removed)
-    const descForTranslation = extracted?.cleaned_description ?? listing.description ?? "";
+    // Use cleaned description for translation (specs removed, deduplicated)
+    const rawDesc = extracted?.cleaned_description ?? listing.description ?? "";
+    const descForTranslation = deduplicateDescription(rawDesc);
 
     // Translations
     let translations: TranslationResult | null = null;
