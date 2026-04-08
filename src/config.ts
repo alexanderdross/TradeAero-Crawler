@@ -68,7 +68,7 @@ export const config = {
     },
   } satisfies Record<string, SourceConfig>,
   /** Default country for German sources */
-  defaultCountry: "DE",
+  defaultCountry: "Germany",
   /** Default currency */
   defaultCurrency: "EUR",
 } as const;
