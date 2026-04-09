@@ -224,14 +224,16 @@ function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: str
 
 async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null, registration?: string | null): Promise<string | null> {
   // 0. Registration prefix override (German registrations are authoritative)
-  //    D-E = Single Engine Piston, D-I = Multi Engine Piston, D-G = Glider,
-  //    D-M = Microlight/UL, D-K = Motorglider
+  //    D-E*** = Single Engine Piston, D-I*** = Multi Engine Piston,
+  //    D-M*** = Microlight/UL, D-K*** = Motorglider,
+  //    D-0000 to D-9999 (numbers) = Glider
   if (registration) {
     const reg = registration.toUpperCase().replace(/\s+/g, "");
     if (/^D-E[A-Z]{2,3}$/.test(reg)) return "Single Engine Piston";
     if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston";
-    if (/^D-G[A-Z]{2,3}$/.test(reg)) return "Glider";
-    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Motorglider";
+    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Glider"; // Motorglider → categorize as Glider
+    if (/^D-\d{4}$/.test(reg)) return "Glider"; // D-1234 = pure glider
+    if (/^D-M[A-Z]{3}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)";
   }
 
   // 1. Reference specs lookup takes priority — the table has correct category
