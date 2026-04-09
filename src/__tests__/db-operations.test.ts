@@ -140,6 +140,7 @@ function makeListing(overrides: Record<string, any> = {}) {
     sourceId: "https://example.com/cessna-172",
     sourceName: "test-source",
     imageUrls: ["https://example.com/img.jpg"],
+    year: 2020,
     ...overrides,
   } as any;
 }
