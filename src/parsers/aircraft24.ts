@@ -211,7 +211,6 @@ function parseListingBlock(
   if (location) {
     // Split by comma and process each part
     const parts = location.split(",").map(p => p.trim()).filter(Boolean);
-    const icaoParts: string[] = [];
     const cityParts: string[] = [];
 
     for (const part of parts) {
