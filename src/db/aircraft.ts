@@ -264,6 +264,20 @@ async function detectCategoryName(sourceUrl: string | undefined, title: string, 
     if (/^OE-[IL][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-I, OE-L: >20t
     if (/^OE-X[A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // OE-X: helicopters
     if (/^OE-W[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-W: amphibians
+
+    // Swiss registrations (HB-xxx)
+    // Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen#Schweiz
+    if (/^HB-[CDEHKNOPSTU][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-C/D/E/H/K/N/O/P/S/T/U: single engine <5.7t
+    if (/^HB-F[A-Z]{2}$/.test(reg)) return "Turboprop"; // HB-F: Swiss production (Pilatus PC-6, PC-12)
+    if (/^HB-[GL][A-Z]{2}$/.test(reg)) return "Multi Engine Piston"; // HB-G/L: twin engine <5.7t
+    if (/^HB-A[A-Z]{2}$/.test(reg)) return "Turboprop"; // HB-A: twin turboprop 5.7-15t
+    if (/^HB-[IJ][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // HB-I/J: >15t
+    if (/^HB-V[A-Z]{2}$/.test(reg)) return "Jet"; // HB-V: business jets <15t
+    if (/^HB-M[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-M: aerobatic
+    if (/^HB-R[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-R: vintage/oldtimer
+    if (/^HB-W[A-Z]{2}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)"; // HB-W: ecolight
+    if (/^HB-[XZ][A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // HB-X/Z: helicopters
+    if (/^HB-Y[A-Z]{2}$/.test(reg)) return "Experimental / Homebuilt"; // HB-Y: experimental
   }
 
   // 1. Reference specs lookup takes priority — the table has correct category
