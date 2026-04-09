@@ -135,7 +135,27 @@ function parseListingBlock(
   if (text.length < 20) return null;
 
   // Extract title (first link text or bold text)
-  const title = $("a").first().text().trim() || $("b, strong").first().text().trim() || text.slice(0, 100);
+  let title = $("a").first().text().trim() || $("b, strong").first().text().trim() || text.slice(0, 100);
+  if (!title || title.length < 3) return null;
+
+  // Clean title: strip embedded metadata that Aircraft24 puts in the listing text
+  // Pattern: "Cessna 172€ 89.000Bj.: 2018; TTAF: 1200h; Standort: Deutschland"
+  // → "Cessna 172"
+  title = title
+    .replace(/€\s*[\d.,]+.*$/s, "")                          // Strip everything after price
+    .replace(/Preis auf Anfrage.*$/si, "")                    // Strip "Preis auf Anfrage" and after
+    .replace(/\bBj\.?\s*:?\s*\d{4}.*$/si, "")                // Strip from year onwards
+    .replace(/\bTTAF\b.*$/si, "")                             // Strip from TTAF onwards
+    .replace(/\bStandort\b.*$/si, "")                         // Strip from Standort onwards
+    .replace(/\bEU versteuert.*$/si, "")                      // Strip EU tax note
+    .replace(/\bNettopreis\b.*$/si, "")                       // Strip net price
+    .replace(/\bSeriennr\.?\b.*$/si, "")                      // Strip serial number
+    .replace(/\bReg\.?\s*Nr\.?\b.*$/si, "")                   // Strip registration
+    .replace(/\bJahresnachpr[üu]fung\b.*$/si, "")             // Strip annual inspection
+    .replace(/\bTyp:\s*\w+.*$/si, "")                         // Strip "Typ: Single-Prop"
+    .replace(/CHF\s*[\d.,]+.*$/si, "")                        // Strip CHF price
+    .trim();
+
   if (!title || title.length < 3) return null;
 
   // Extract year: "Bj.: 2018" or "Bj. 2018"
