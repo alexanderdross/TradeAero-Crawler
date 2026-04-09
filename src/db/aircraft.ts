@@ -410,6 +410,65 @@ function cleanCountry(country: string | null): string | null {
 }
 
 /**
+ * Detect country from aircraft registration prefix.
+ * Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen
+ * Returns English country name or null if unknown.
+ */
+function countryFromRegistration(registration: string | null): string | null {
+  if (!registration) return null;
+  const reg = registration.toUpperCase().replace(/\s+/g, "");
+
+  // European countries (most relevant for TradeAero marketplace)
+  if (reg.startsWith("D-")) return "Germany";
+  if (reg.startsWith("OE-")) return "Austria";
+  if (reg.startsWith("HB-")) return "Switzerland";
+  if (reg.startsWith("F-")) return "France";
+  if (reg.startsWith("G-")) return "United Kingdom";
+  if (reg.startsWith("I-")) return "Italy";
+  if (reg.startsWith("EC-")) return "Spain";
+  if (reg.startsWith("PH-")) return "Netherlands";
+  if (reg.startsWith("OO-")) return "Belgium";
+  if (reg.startsWith("SP-")) return "Poland";
+  if (reg.startsWith("OK-")) return "Czech Republic";
+  if (reg.startsWith("SE-")) return "Sweden";
+  if (reg.startsWith("LN-")) return "Norway";
+  if (reg.startsWith("OY-")) return "Denmark";
+  if (reg.startsWith("OH-")) return "Finland";
+  if (reg.startsWith("SX-")) return "Greece";
+  if (reg.startsWith("TC-")) return "Turkey";
+  if (reg.startsWith("HA-")) return "Hungary";
+  if (reg.startsWith("YR-")) return "Romania";
+  if (reg.startsWith("9A-")) return "Croatia";
+  if (reg.startsWith("OM-")) return "Slovakia";
+  if (reg.startsWith("S5-")) return "Slovenia";
+  if (reg.startsWith("LZ-")) return "Bulgaria";
+  if (reg.startsWith("EI-") || reg.startsWith("EJ-")) return "Ireland";
+  if (reg.startsWith("TF-")) return "Iceland";
+  if (reg.startsWith("ES-")) return "Estonia";
+  if (reg.startsWith("YL-")) return "Latvia";
+  if (reg.startsWith("LY-")) return "Lithuania";
+  if (reg.startsWith("LX-")) return "Luxembourg";
+  if (reg.startsWith("9H-")) return "Malta";
+  if (reg.startsWith("CS-") || reg.startsWith("CR-")) return "Portugal";
+  if (reg.startsWith("UR-")) return "Ukraine";
+
+  // Non-European (common in international market)
+  if (reg.startsWith("N")) return "United States"; // N-numbers (no dash)
+  if (reg.startsWith("C-") || reg.startsWith("CF-")) return "Canada";
+  if (reg.startsWith("VH-")) return "Australia";
+  if (reg.startsWith("ZK-") || reg.startsWith("ZL-") || reg.startsWith("ZM-")) return "New Zealand";
+  if (reg.startsWith("ZS-") || reg.startsWith("ZT-") || reg.startsWith("ZU-")) return "South Africa";
+  if (reg.startsWith("PP-") || reg.startsWith("PR-") || reg.startsWith("PT-") || reg.startsWith("PU-")) return "Brazil";
+  if (reg.startsWith("JA-")) return "Japan";
+  if (reg.startsWith("RA-") || reg.startsWith("RF-")) return "Russia";
+  if (reg.startsWith("9V-")) return "Singapore";
+  if (reg.startsWith("VT-")) return "India";
+  if (reg.startsWith("B-")) return "China";
+
+  return null;
+}
+
+/**
  * Validate ICAO airport code — must be exactly 4 uppercase letters
  * starting with a valid regional prefix.
  */
@@ -553,7 +612,7 @@ export async function upsertAircraftListing(
       engine_hours: listing.engineHours ?? null,
       engine_type_name: listing.engine ?? null,
       location: listing.location ?? "",
-      country: cleanCountry(listing.country) ?? "Germany",
+      country: cleanCountry(listing.country) ?? countryFromRegistration(listing.registration) ?? "Germany",
       city: cleanCity(listing.city) ?? null,
       state: null as string | null,
       icaocode: cleanIcaoCode(listing.icaoCode) ?? null,
