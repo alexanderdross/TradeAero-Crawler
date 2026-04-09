@@ -169,20 +169,117 @@ function isCleanModel(model: string): boolean {
 function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: string): string | null {
   const url = (sourceUrl ?? "").toLowerCase();
   const t = title.toLowerCase();
+
+  // Helicopter / Gyrocopter
   if (url.includes("/hubschrauber") || url.includes("/helicopter") || t.includes("helicopter") ||
-      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro")) return "Helicopter / Gyrocopter";
+      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro") ||
+      t.includes("tragschrauber")) return "Helicopter / Gyrocopter";
+
+  // Glider / Motorglider
   if (url.includes("/segelflugzeug") || url.includes("/glider") || t.includes("glider") ||
       t.includes("segelflugzeug") || t.includes("sailplane") || t.includes("motorsegler") ||
-      t.includes("motor glider")) return "Glider";
-  if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop")) return "Turboprop";
-  if (url.includes("/jet") || t.includes(" jet") || t.match(/\bjet\b/)) return "Jet";
+      t.includes("motor glider") || t.includes("tmg")) return "Glider";
+
+  // Microlight / Flex-Wing / Trike
+  if (t.includes("trike") || t.includes("flex-wing") || t.includes("flexwing") ||
+      t.includes("paramotor") || t.includes("motorschirm") || t.includes("drachen") ||
+      t.includes("hängegleiter") || t.includes("weight-shift") || t.includes("drachenfläche") ||
+      url.includes("/trike")) return "Microlight / Flex-Wing";
+
+  // Turboprop
+  if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop") ||
+      t.includes("king air") || t.includes("tbm ") || t.includes("pc-12") || t.includes("caravan")) return "Turboprop";
+
+  // Jet
+  if (url.includes("/jet") || t.match(/\bjet\b/) || t.includes("citation") ||
+      t.includes("phenom") || t.includes("learjet") || t.includes("gulfstream") ||
+      t.includes("falcon ") || t.includes("challenger") || t.includes("global ")) return "Jet";
+
+  // Multi Engine Piston
+  if (t.includes("twin") || t.includes("multi engine") || t.includes("zweimotorig") ||
+      t.includes("baron") || t.includes("seneca") || t.includes("seminole") ||
+      t.includes("duchess") || t.includes("apache") || url.includes("/multiprop") ||
+      url.includes("/mehrmotorig")) return "Multi Engine Piston";
+
+  // Single Engine Piston (common keywords)
+  if (url.includes("/singleprop") || url.includes("/einmotorig") ||
+      url.includes("/kolbenmotorflugzeug")) return "Single Engine Piston";
+
+  // Experimental / Homebuilt
+  if (t.includes("experimental") || t.includes("eigenbau") || t.includes("homebuilt") ||
+      t.includes("kit-built") || t.includes("kitbuilt") || t.includes("selbstbau") ||
+      url.includes("/experimental")) return "Experimental / Homebuilt";
+
+  // Commercial Airliner
+  if (t.includes("airliner") || t.includes("verkehrsflugzeug") || t.includes("boeing 7") ||
+      t.includes("airbus a3")) return "Commercial Airliner";
+
+  // Ultralight / LSA (broadest match — last to avoid false positives)
   if (url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
       url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
-      t.includes(" ul ") || t.match(/\bul\b/)) return "Ultralight / Light Sport Aircraft (LSA)";
+      t.includes(" ul ") || t.match(/\bul\b/) || t.match(/\blsa\b/)) return "Ultralight / Light Sport Aircraft (LSA)";
+
   return null;
 }
 
-async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null): Promise<string | null> {
+async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null, registration?: string | null): Promise<string | null> {
+  // 0. Registration prefix override (German registrations per LBA)
+  //    Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen
+  //    D-A = Aircraft >20t (Commercial Airliner)
+  //    D-B = Aircraft 14-20t (Commercial Airliner)
+  //    D-C = Aircraft 5.7-14t (Jet — Saab 340, Citation CJ3, Learjet 35)
+  //    D-E = Single engine <2t (Piper PA-28, Cessna 172, Robin DR400)
+  //    D-F = Single engine 2-5.7t (PC-12, An-2, Cessna 208)
+  //    D-G = Multi engine <2t (Diamond DA42 Twin Star, CriCri)
+  //    D-H = Helicopter (EC 135, EC 145)
+  //    D-I = Multi engine 2-5.7t (Piaggio Avanti, Citation CJ1+, Piper PA-42)
+  //    D-K = Motorglider (Grob G 109, Scheibe Falke, Super Dimona)
+  //    D-L = Airship (Zeppelin NT)
+  //    D-M = Ultralight <600kg (FK 9, Ikarus C42, Shark Aero UL)
+  //    D-N = Non-motorized sport aircraft (hang glider, paraglider)
+  //    D-xxxx = Glider (LS4, K 8, ASK 13, ASK 21, Discus, Astir)
+  if (registration) {
+    const reg = registration.toUpperCase().replace(/\s+/g, "");
+    if (/^D-[AB][A-Z]{2,3}$/.test(reg)) return "Commercial Airliner";
+    if (/^D-C[A-Z]{2,3}$/.test(reg)) return "Jet";
+    if (/^D-E[A-Z]{2,3}$/.test(reg)) return "Single Engine Piston";
+    if (/^D-F[A-Z]{2,3}$/.test(reg)) return "Turboprop"; // Single engine 2-5.7t → mostly turboprops (PC-12, Caravan)
+    if (/^D-G[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston"; // Multi engine <2t
+    if (/^D-H[A-Z]{2,3}$/.test(reg)) return "Helicopter / Gyrocopter";
+    if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston"; // Multi engine 2-5.7t
+    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Glider"; // Motorglider → Glider category
+    if (/^D-M[A-Z]{3}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)";
+    if (/^D-N[A-Z]{3}$/.test(reg)) return "Microlight / Flex-Wing"; // Hang gliders, paragliders
+    if (/^D-\d{4}$/.test(reg)) return "Glider"; // Pure gliders use numeric registrations
+
+    // Austrian registrations (OE-xxx)
+    // Source: Austrian LBA registration system
+    if (/^OE-[AC][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-A, OE-C: single engine <2t
+    if (/^OE-B[A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-B: government aircraft
+    if (/^OE-[DK][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-D, OE-K: single engine <2t >3 seats
+    if (/^OE-E[A-Z]{2}$/.test(reg)) return "Turboprop"; // OE-E: single engine 2-5.7t
+    if (/^OE-F[A-Z]{2}$/.test(reg)) return "Multi Engine Piston"; // OE-F: multi engine <5.7t
+    if (/^OE-G[A-Z]{2}$/.test(reg)) return "Jet"; // OE-G: 5.7-14t
+    if (/^OE-H[A-Z]{2}$/.test(reg)) return "Jet"; // OE-H: 14-20t
+    if (/^OE-[IL][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-I, OE-L: >20t
+    if (/^OE-X[A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // OE-X: helicopters
+    if (/^OE-W[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-W: amphibians
+
+    // Swiss registrations (HB-xxx)
+    // Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen#Schweiz
+    if (/^HB-[CDEHKNOPSTU][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-C/D/E/H/K/N/O/P/S/T/U: single engine <5.7t
+    if (/^HB-F[A-Z]{2}$/.test(reg)) return "Turboprop"; // HB-F: Swiss production (Pilatus PC-6, PC-12)
+    if (/^HB-[GL][A-Z]{2}$/.test(reg)) return "Multi Engine Piston"; // HB-G/L: twin engine <5.7t
+    if (/^HB-A[A-Z]{2}$/.test(reg)) return "Turboprop"; // HB-A: twin turboprop 5.7-15t
+    if (/^HB-[IJ][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // HB-I/J: >15t
+    if (/^HB-V[A-Z]{2}$/.test(reg)) return "Jet"; // HB-V: business jets <15t
+    if (/^HB-M[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-M: aerobatic
+    if (/^HB-R[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-R: vintage/oldtimer
+    if (/^HB-W[A-Z]{2}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)"; // HB-W: ecolight
+    if (/^HB-[XZ][A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // HB-X/Z: helicopters
+    if (/^HB-Y[A-Z]{2}$/.test(reg)) return "Experimental / Homebuilt"; // HB-Y: experimental
+  }
+
   // 1. Reference specs lookup takes priority — the table has correct category
   //    for every known manufacturer+model combo (475+ entries).
   //    This prevents e.g. Mooney/Piper/Agusta being miscategorized as LSA
@@ -313,6 +410,65 @@ function cleanCountry(country: string | null): string | null {
 }
 
 /**
+ * Detect country from aircraft registration prefix.
+ * Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen
+ * Returns English country name or null if unknown.
+ */
+function countryFromRegistration(registration: string | null): string | null {
+  if (!registration) return null;
+  const reg = registration.toUpperCase().replace(/\s+/g, "");
+
+  // European countries (most relevant for TradeAero marketplace)
+  if (reg.startsWith("D-")) return "Germany";
+  if (reg.startsWith("OE-")) return "Austria";
+  if (reg.startsWith("HB-")) return "Switzerland";
+  if (reg.startsWith("F-")) return "France";
+  if (reg.startsWith("G-")) return "United Kingdom";
+  if (reg.startsWith("I-")) return "Italy";
+  if (reg.startsWith("EC-")) return "Spain";
+  if (reg.startsWith("PH-")) return "Netherlands";
+  if (reg.startsWith("OO-")) return "Belgium";
+  if (reg.startsWith("SP-")) return "Poland";
+  if (reg.startsWith("OK-")) return "Czech Republic";
+  if (reg.startsWith("SE-")) return "Sweden";
+  if (reg.startsWith("LN-")) return "Norway";
+  if (reg.startsWith("OY-")) return "Denmark";
+  if (reg.startsWith("OH-")) return "Finland";
+  if (reg.startsWith("SX-")) return "Greece";
+  if (reg.startsWith("TC-")) return "Turkey";
+  if (reg.startsWith("HA-")) return "Hungary";
+  if (reg.startsWith("YR-")) return "Romania";
+  if (reg.startsWith("9A-")) return "Croatia";
+  if (reg.startsWith("OM-")) return "Slovakia";
+  if (reg.startsWith("S5-")) return "Slovenia";
+  if (reg.startsWith("LZ-")) return "Bulgaria";
+  if (reg.startsWith("EI-") || reg.startsWith("EJ-")) return "Ireland";
+  if (reg.startsWith("TF-")) return "Iceland";
+  if (reg.startsWith("ES-")) return "Estonia";
+  if (reg.startsWith("YL-")) return "Latvia";
+  if (reg.startsWith("LY-")) return "Lithuania";
+  if (reg.startsWith("LX-")) return "Luxembourg";
+  if (reg.startsWith("9H-")) return "Malta";
+  if (reg.startsWith("CS-") || reg.startsWith("CR-")) return "Portugal";
+  if (reg.startsWith("UR-")) return "Ukraine";
+
+  // Non-European (common in international market)
+  if (reg.startsWith("N")) return "United States"; // N-numbers (no dash)
+  if (reg.startsWith("C-") || reg.startsWith("CF-")) return "Canada";
+  if (reg.startsWith("VH-")) return "Australia";
+  if (reg.startsWith("ZK-") || reg.startsWith("ZL-") || reg.startsWith("ZM-")) return "New Zealand";
+  if (reg.startsWith("ZS-") || reg.startsWith("ZT-") || reg.startsWith("ZU-")) return "South Africa";
+  if (reg.startsWith("PP-") || reg.startsWith("PR-") || reg.startsWith("PT-") || reg.startsWith("PU-")) return "Brazil";
+  if (reg.startsWith("JA-")) return "Japan";
+  if (reg.startsWith("RA-") || reg.startsWith("RF-")) return "Russia";
+  if (reg.startsWith("9V-")) return "Singapore";
+  if (reg.startsWith("VT-")) return "India";
+  if (reg.startsWith("B-")) return "China";
+
+  return null;
+}
+
+/**
  * Validate ICAO airport code — must be exactly 4 uppercase letters
  * starting with a valid regional prefix.
  */
@@ -407,7 +563,7 @@ export async function upsertAircraftListing(
     // Extract clean model name from title (prefers reference spec match)
     const modelName = extractModelFromTitle(cleanTitle, manufacturerName, refSpecs as any);
 
-    const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName);
+    const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName, listing.registration);
     const categoryId = detectedCategoryName ? await getCategoryId(detectedCategoryName) : null;
 
     // Dedup
@@ -456,7 +612,7 @@ export async function upsertAircraftListing(
       engine_hours: listing.engineHours ?? null,
       engine_type_name: listing.engine ?? null,
       location: listing.location ?? "",
-      country: cleanCountry(listing.country) ?? "Germany",
+      country: cleanCountry(listing.country) ?? countryFromRegistration(listing.registration) ?? "Germany",
       city: cleanCity(listing.city) ?? null,
       state: null as string | null,
       icaocode: cleanIcaoCode(listing.icaoCode) ?? null,
