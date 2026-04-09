@@ -185,24 +185,64 @@ function parseListingBlock(
   const locationMatch = text.match(/(?:Standort|Location)[:\s]*([^;|\n]+)/i);
   const location = locationMatch ? cleanText(locationMatch[1]) : null;
 
-  // Parse city and ICAO code from location string
-  // Patterns: "München (EDDM)", "Strausberg/EDAY", "München"
+  // Parse city, country, and ICAO code from location string
+  // Patterns:
+  //   "München (EDDM)" → city=München, icao=EDDM
+  //   "Deutschland, Schönhagen, EDAZ" → country=Germany, city=Schönhagen, icao=EDAZ
+  //   "Deutschland, EDRE" → country=Germany, icao=EDRE
+  //   "Brasilien, SBMT" → country=Brazil, icao=SBMT
+  //   "Strausberg/EDAY" → city=Strausberg, icao=EDAY
   let city24: string | null = null;
   let icaoCode24: string | null = null;
+  let country24FromLocation: string | null = null;
+
+  const LOCATION_COUNTRY_MAP: Record<string, string> = {
+    "deutschland": "Germany", "frankreich": "France", "spanien": "Spain",
+    "italien": "Italy", "oesterreich": "Austria", "österreich": "Austria",
+    "schweiz": "Switzerland", "niederlande": "Netherlands", "holland": "Netherlands",
+    "belgien": "Belgium", "polen": "Poland", "tschechien": "Czech Republic",
+    "schweden": "Sweden", "norwegen": "Norway", "dänemark": "Denmark",
+    "griechenland": "Greece", "türkei": "Turkey", "ungarn": "Hungary",
+    "rumänien": "Romania", "kroatien": "Croatia", "slowakei": "Slovakia",
+    "slowenien": "Slovenia", "bulgarien": "Bulgaria", "brasilien": "Brazil",
+    "portugal": "Portugal", "finnland": "Finland",
+  };
+
   if (location) {
-    const icaoParenMatch = location.match(/\(([A-Z]{4})\)/);
-    if (icaoParenMatch) {
-      icaoCode24 = icaoParenMatch[1];
-      city24 = location.replace(/\s*\([A-Z]{4}\)/, "").trim().split(/[/,]/)[0].trim() || null;
-    } else {
-      const slashIcaoMatch = location.match(/\/([A-Z]{4})$/);
-      if (slashIcaoMatch) {
-        icaoCode24 = slashIcaoMatch[1];
-        city24 = location.replace(/\/[A-Z]{4}$/, "").trim() || null;
-      } else {
-        city24 = location.split(/[/(,]/)[0].trim() || null;
+    // Split by comma and process each part
+    const parts = location.split(",").map(p => p.trim()).filter(Boolean);
+    const icaoParts: string[] = [];
+    const cityParts: string[] = [];
+
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      // Check if part is a country name
+      if (LOCATION_COUNTRY_MAP[lower]) {
+        country24FromLocation = LOCATION_COUNTRY_MAP[lower];
+      }
+      // Check if part is an ICAO code (4 uppercase letters)
+      else if (/^[A-Z]{4}$/.test(part) && /^(ED|ET|LO|LS|LF|LE|LI|EH|EB|EP|LK|ES|EN|EK|LG|LT|LH|LR|LD|EG|EI|EF|SB|SK|SA)/.test(part)) {
+        icaoCode24 = part;
+      }
+      // Check for ICAO in parentheses: "München (EDDM)"
+      else if (/\([A-Z]{4}\)/.test(part)) {
+        const m = part.match(/\(([A-Z]{4})\)/);
+        if (m) icaoCode24 = m[1];
+        cityParts.push(part.replace(/\s*\([A-Z]{4}\)/, "").trim());
+      }
+      // Check for ICAO after slash: "Strausberg/EDAY"
+      else if (/\/[A-Z]{4}$/.test(part)) {
+        const m = part.match(/\/([A-Z]{4})$/);
+        if (m) icaoCode24 = m[1];
+        cityParts.push(part.replace(/\/[A-Z]{4}$/, "").trim());
+      }
+      // Otherwise it's a city/region name
+      else if (part.length >= 2) {
+        cityParts.push(part);
       }
     }
+
+    city24 = cityParts[0] || null;
   }
   // Fallback: scan full text for ICAO codes if not found in location
   if (!icaoCode24) {
@@ -216,7 +256,9 @@ function parseListingBlock(
     LK: "Czech Republic", EP: "Poland", EH: "Netherlands",
     LI: "Italy", EK: "Denmark", ES: "Sweden", EN: "Norway", EF: "Finland",
   };
-  const country24 = icaoCode24 ? (ICAO_TO_COUNTRY24[icaoCode24.substring(0, 2)] ?? null) : null;
+  // Country priority: explicit from Standort text > ICAO prefix
+  const country24 = country24FromLocation
+    ?? (icaoCode24 ? (ICAO_TO_COUNTRY24[icaoCode24.substring(0, 2)] ?? null) : null);
 
   // Extract detail page URL
   let detailUrl: string | null = null;

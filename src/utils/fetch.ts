@@ -56,7 +56,27 @@ export async function fetchPage(url: string, options?: { proxy?: boolean }): Pro
         throw new Error(`Response too large: ${contentLength} bytes (limit: ${MAX_PAGE_SIZE})`);
       }
 
-      const html = await response.text();
+      // Detect charset from Content-Type header or HTML meta tag
+      // Aircraft24 and other German sites often use ISO-8859-1 / Windows-1252
+      const contentType = response.headers.get("content-type") ?? "";
+      let html: string;
+      if (/charset\s*=\s*(iso-8859-1|windows-1252|latin-?1)/i.test(contentType)) {
+        const buffer = await response.arrayBuffer();
+        html = new TextDecoder("iso-8859-1").decode(buffer);
+      } else {
+        html = await response.text();
+        // Fallback: check HTML meta charset
+        if (html.includes("�") || html.includes("Ã¤")) {
+          // Likely mis-decoded ISO-8859-1 as UTF-8, re-decode
+          const encoder = new TextEncoder();
+          const decoder = new TextDecoder("iso-8859-1");
+          try {
+            const reEncoded = encoder.encode(html);
+            const reDecoded = decoder.decode(reEncoded);
+            if (!reDecoded.includes("�")) html = reDecoded;
+          } catch { /* keep original */ }
+        }
+      }
 
       if (html.length > MAX_PAGE_SIZE) {
         throw new Error(`Response body too large: ${html.length} bytes`);
