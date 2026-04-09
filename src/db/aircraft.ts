@@ -216,7 +216,16 @@ const COUNTRY_NAMES = new Set([
 const INVALID_CITY_WORDS = new Set([
   "factory", "available", "maintenance", "man", "flugplatz", "airport",
   "hangar", "lagerung", "werkstatt", "museum", "studio", "office",
-  "base", "depot", "storage",
+  "base", "depot", "storage", "verkauf", "verkaufe", "verkaufen",
+  "privatverkauf", "biete", "angeboten", "angebot", "suche", "trike",
+  "cessna", "piper", "beechcraft", "diamond", "cirrus", "mooney",
+  "rotax", "lycoming", "continental", "jabiru", "motor", "propeller",
+  "baujahr", "betriebsstunden", "stunden", "flugstunden", "preis",
+  "einsitzer", "doppelsitzer", "ultraleicht", "ultralight", "experimental",
+  "sportflugzeug", "flugzeug", "aircraft", "airplane", "plane",
+  "fallen", "defekt", "beschädigt", "unfall", "unfälle", "crashed",
+  "telefon", "email", "kontakt", "contact", "noreply", "info",
+  "hersteller", "manufacturer", "modell", "model", "type", "typ",
 ]);
 
 /** German → English country name mapping */
@@ -240,7 +249,7 @@ function cleanCity(city: string | null, _country?: string | null): string | null
   if (COUNTRY_NAMES.has(cleaned.toLowerCase())) return null;
 
   // Strip country prefix: "Deutschland, Grefrath" → "Grefrath"
-  const commaMatch = cleaned.match(/^(?:Deutschland|Italien|Frankreich|Spanien|Schweiz|Österreich|Germany|Italy|France|Spain|Switzerland|Austria),\s*(.+)$/i);
+  const commaMatch = cleaned.match(/^(?:Deutschland|Italien|Frankreich|Spanien|Schweiz|Österreich|Germany|Italy|France|Spain|Switzerland|Austria|Oesterreich|Dänemark|Denmark|Polen|Poland|Ungarn|Hungary|Tschechien|Niederlande|Netherlands|Belgien|Belgium),?\s*(.+)$/i);
   if (commaMatch) cleaned = commaMatch[1].trim();
 
   // Strip ICAO code suffix: "Kapfenberg LOGK" → "Kapfenberg"
@@ -249,16 +258,48 @@ function cleanCity(city: string | null, _country?: string | null): string | null
     cleaned = icaoMatch[1].trim();
   }
 
-  // Strip airport prefix: "Flugplatz Bonn-Hangelar" → "Bonn-Hangelar"
-  cleaned = cleaned.replace(/^(?:Flugplatz|Flughafen|Airport|Airfield)\s+/i, "").trim();
+  // Strip ICAO in parentheses: "München (EDDM)" → "München"
+  cleaned = cleaned.replace(/\s*\([A-Z]{4}\)\s*/g, "").trim();
+  // Strip ICAO after slash: "Strausberg/EDAY" → "Strausberg"
+  cleaned = cleaned.replace(/\/[A-Z]{4}$/, "").trim();
 
-  // Strip trailing garbage: "Magdeburg Lagerung Hangar" → "Magdeburg"
-  cleaned = cleaned.replace(/\s+(?:Lagerung|Hangar|Unfall|Werkstatt|Museum).*$/i, "").trim();
+  // Strip airport/location prefixes
+  cleaned = cleaned.replace(/^(?:Flugplatz|Flughafen|Airport|Airfield|Standort|Raum|Region|Nähe|bei|near|in)\s+/i, "").trim();
 
-  // Reject invalid city names
-  if (INVALID_CITY_WORDS.has(cleaned.toLowerCase())) return null;
-  if (cleaned.length < 2 || cleaned.length > 50) return null;
-  if (/^\d+$/.test(cleaned)) return null;
+  // Strip trailing garbage keywords
+  cleaned = cleaned.replace(/\s+(?:Lagerung|Hangar|Unfall|Werkstatt|Museum|Privatverkauf|Verkauf|Baujahr|BJ|Motor|Rotax|Standort|Flugplatz|Flughafen|southwest|northwest|northeast|southeast|NM|km|Stunden|Betriebsstunden).*$/i, "").trim();
+
+  // Strip postal codes: "86150 Augsburg" → "Augsburg"
+  cleaned = cleaned.replace(/^\d{4,5}\s+/, "").trim();
+
+  // Strip "15NM southwest of Bremen, Germany" patterns
+  cleaned = cleaned.replace(/^\d+\s*NM\s+\w+\s+(?:of|von)\s+/i, "").trim();
+
+  // Strip "nähe von Amsterdam" → "Amsterdam"
+  cleaned = cleaned.replace(/^nähe\s+(?:von\s+)?/i, "").trim();
+
+  // Take only first part before comma (city, not description)
+  if (cleaned.includes(",")) {
+    cleaned = cleaned.split(",")[0].trim();
+  }
+
+  // Reject if any word is in the invalid set
+  const words = cleaned.toLowerCase().split(/\s+/);
+  for (const word of words) {
+    if (INVALID_CITY_WORDS.has(word)) return null;
+  }
+
+  // Reject if city contains numbers (except hyphenated like "Bad-1" which doesn't exist)
+  if (/\d/.test(cleaned)) return null;
+
+  // Reject city names that are too long (real cities are max ~30 chars)
+  if (cleaned.length < 2 || cleaned.length > 35) return null;
+
+  // Reject if it looks like a sentence (more than 4 words)
+  if (words.length > 4) return null;
+
+  // Reject if it starts with a lowercase letter (not a proper noun)
+  if (/^[a-zäöü]/.test(cleaned)) return null;
 
   return cleaned;
 }
