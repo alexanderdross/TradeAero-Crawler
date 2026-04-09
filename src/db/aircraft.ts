@@ -169,16 +169,56 @@ function isCleanModel(model: string): boolean {
 function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: string): string | null {
   const url = (sourceUrl ?? "").toLowerCase();
   const t = title.toLowerCase();
+
+  // Helicopter / Gyrocopter
   if (url.includes("/hubschrauber") || url.includes("/helicopter") || t.includes("helicopter") ||
-      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro")) return "Helicopter / Gyrocopter";
+      t.includes("hubschrauber") || t.includes("gyrocopter") || t.includes("autogyro") ||
+      t.includes("tragschrauber")) return "Helicopter / Gyrocopter";
+
+  // Glider / Motorglider
   if (url.includes("/segelflugzeug") || url.includes("/glider") || t.includes("glider") ||
       t.includes("segelflugzeug") || t.includes("sailplane") || t.includes("motorsegler") ||
-      t.includes("motor glider")) return "Glider";
-  if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop")) return "Turboprop";
-  if (url.includes("/jet") || t.includes(" jet") || t.match(/\bjet\b/)) return "Jet";
+      t.includes("motor glider") || t.includes("tmg")) return "Glider";
+
+  // Microlight / Flex-Wing / Trike
+  if (t.includes("trike") || t.includes("flex-wing") || t.includes("flexwing") ||
+      t.includes("paramotor") || t.includes("motorschirm") || t.includes("drachen") ||
+      t.includes("hängegleiter") || t.includes("weight-shift") || t.includes("drachenfläche") ||
+      url.includes("/trike")) return "Microlight / Flex-Wing";
+
+  // Turboprop
+  if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop") ||
+      t.includes("king air") || t.includes("tbm ") || t.includes("pc-12") || t.includes("caravan")) return "Turboprop";
+
+  // Jet
+  if (url.includes("/jet") || t.match(/\bjet\b/) || t.includes("citation") ||
+      t.includes("phenom") || t.includes("learjet") || t.includes("gulfstream") ||
+      t.includes("falcon ") || t.includes("challenger") || t.includes("global ")) return "Jet";
+
+  // Multi Engine Piston
+  if (t.includes("twin") || t.includes("multi engine") || t.includes("zweimotorig") ||
+      t.includes("baron") || t.includes("seneca") || t.includes("seminole") ||
+      t.includes("duchess") || t.includes("apache") || url.includes("/multiprop") ||
+      url.includes("/mehrmotorig")) return "Multi Engine Piston";
+
+  // Single Engine Piston (common keywords)
+  if (url.includes("/singleprop") || url.includes("/einmotorig") ||
+      url.includes("/kolbenmotorflugzeug")) return "Single Engine Piston";
+
+  // Experimental / Homebuilt
+  if (t.includes("experimental") || t.includes("eigenbau") || t.includes("homebuilt") ||
+      t.includes("kit-built") || t.includes("kitbuilt") || t.includes("selbstbau") ||
+      url.includes("/experimental")) return "Experimental / Homebuilt";
+
+  // Commercial Airliner
+  if (t.includes("airliner") || t.includes("verkehrsflugzeug") || t.includes("boeing 7") ||
+      t.includes("airbus a3")) return "Commercial Airliner";
+
+  // Ultralight / LSA (broadest match — last to avoid false positives)
   if (url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
       url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
-      t.includes(" ul ") || t.match(/\bul\b/)) return "Ultralight / Light Sport Aircraft (LSA)";
+      t.includes(" ul ") || t.match(/\bul\b/) || t.match(/\blsa\b/)) return "Ultralight / Light Sport Aircraft (LSA)";
+
   return null;
 }
 
