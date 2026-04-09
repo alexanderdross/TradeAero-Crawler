@@ -223,17 +223,47 @@ function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: str
 }
 
 async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null, registration?: string | null): Promise<string | null> {
-  // 0. Registration prefix override (German registrations are authoritative)
-  //    D-E*** = Single Engine Piston, D-I*** = Multi Engine Piston,
-  //    D-M*** = Microlight/UL, D-K*** = Motorglider,
-  //    D-0000 to D-9999 (numbers) = Glider
+  // 0. Registration prefix override (German registrations per LBA)
+  //    Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen
+  //    D-A = Aircraft >20t (Commercial Airliner)
+  //    D-B = Aircraft 14-20t (Commercial Airliner)
+  //    D-C = Aircraft 5.7-14t (Jet — Saab 340, Citation CJ3, Learjet 35)
+  //    D-E = Single engine <2t (Piper PA-28, Cessna 172, Robin DR400)
+  //    D-F = Single engine 2-5.7t (PC-12, An-2, Cessna 208)
+  //    D-G = Multi engine <2t (Diamond DA42 Twin Star, CriCri)
+  //    D-H = Helicopter (EC 135, EC 145)
+  //    D-I = Multi engine 2-5.7t (Piaggio Avanti, Citation CJ1+, Piper PA-42)
+  //    D-K = Motorglider (Grob G 109, Scheibe Falke, Super Dimona)
+  //    D-L = Airship (Zeppelin NT)
+  //    D-M = Ultralight <600kg (FK 9, Ikarus C42, Shark Aero UL)
+  //    D-N = Non-motorized sport aircraft (hang glider, paraglider)
+  //    D-xxxx = Glider (LS4, K 8, ASK 13, ASK 21, Discus, Astir)
   if (registration) {
     const reg = registration.toUpperCase().replace(/\s+/g, "");
+    if (/^D-[AB][A-Z]{2,3}$/.test(reg)) return "Commercial Airliner";
+    if (/^D-C[A-Z]{2,3}$/.test(reg)) return "Jet";
     if (/^D-E[A-Z]{2,3}$/.test(reg)) return "Single Engine Piston";
-    if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston";
-    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Glider"; // Motorglider → categorize as Glider
-    if (/^D-\d{4}$/.test(reg)) return "Glider"; // D-1234 = pure glider
+    if (/^D-F[A-Z]{2,3}$/.test(reg)) return "Turboprop"; // Single engine 2-5.7t → mostly turboprops (PC-12, Caravan)
+    if (/^D-G[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston"; // Multi engine <2t
+    if (/^D-H[A-Z]{2,3}$/.test(reg)) return "Helicopter / Gyrocopter";
+    if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston"; // Multi engine 2-5.7t
+    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Glider"; // Motorglider → Glider category
     if (/^D-M[A-Z]{3}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)";
+    if (/^D-N[A-Z]{3}$/.test(reg)) return "Microlight / Flex-Wing"; // Hang gliders, paragliders
+    if (/^D-\d{4}$/.test(reg)) return "Glider"; // Pure gliders use numeric registrations
+
+    // Austrian registrations (OE-xxx)
+    // Source: Austrian LBA registration system
+    if (/^OE-[AC][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-A, OE-C: single engine <2t
+    if (/^OE-B[A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-B: government aircraft
+    if (/^OE-[DK][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-D, OE-K: single engine <2t >3 seats
+    if (/^OE-E[A-Z]{2}$/.test(reg)) return "Turboprop"; // OE-E: single engine 2-5.7t
+    if (/^OE-F[A-Z]{2}$/.test(reg)) return "Multi Engine Piston"; // OE-F: multi engine <5.7t
+    if (/^OE-G[A-Z]{2}$/.test(reg)) return "Jet"; // OE-G: 5.7-14t
+    if (/^OE-H[A-Z]{2}$/.test(reg)) return "Jet"; // OE-H: 14-20t
+    if (/^OE-[IL][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-I, OE-L: >20t
+    if (/^OE-X[A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // OE-X: helicopters
+    if (/^OE-W[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-W: amphibians
   }
 
   // 1. Reference specs lookup takes priority — the table has correct category
