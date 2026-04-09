@@ -349,6 +349,11 @@ export async function upsertAircraftListing(
       return "skipped";
     }
 
+    if (!listing.year) {
+      logger.debug(`Skipping listing with no year: "${listing.title}"`);
+      return "skipped";
+    }
+
     const cleanTitle = stripTitleDatePrefix(listing.title);
 
     const manufacturerName = await resolveManufacturer(cleanTitle);
@@ -376,7 +381,13 @@ export async function upsertAircraftListing(
 
     // Use cleaned description for translation (specs removed, deduplicated)
     const rawDesc = extracted?.cleaned_description ?? listing.description ?? "";
-    const descForTranslation = deduplicateDescription(rawDesc);
+    let descForTranslation = deduplicateDescription(rawDesc);
+    // Fallback: ensure description meets the 10-char minimum (description_check constraint)
+    if (!descForTranslation || descForTranslation.trim().length < 10) {
+      descForTranslation = listing.description && listing.description.trim().length >= 10
+        ? listing.description
+        : `${cleanTitle} — ${listing.year ?? ""}`.trim();
+    }
 
     // Translations
     let translations: TranslationResult | null = null;
@@ -396,10 +407,10 @@ export async function upsertAircraftListing(
       headline: cleanTitle,
       model: modelName,
       description: descForTranslation,
-      year: listing.year ?? null,
-      price: listing.price ?? null,
+      year: listing.year,
+      price: listing.price ?? 0,
       currency: "EUR",
-      price_negotiable: listing.priceNegotiable,
+      price_negotiable: listing.price ? listing.priceNegotiable : true,
       total_time: listing.totalTime ?? null,
       engine_hours: listing.engineHours ?? null,
       engine_type_name: listing.engine ?? null,
