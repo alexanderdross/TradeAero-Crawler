@@ -21,55 +21,55 @@
 -- Agusta (pre-2000, before AgustaWestland merger)
 INSERT INTO aircraft_reference_specs (manufacturer, model, variant, category)
 VALUES
-  ('Agusta', 'A109', NULL, 'Helicopter'),
-  ('Agusta', 'A119', 'Koala', 'Helicopter'),
-  ('Agusta', 'A109', 'Power', 'Helicopter')
+  ('Agusta', 'A109', NULL, 'Helicopter / Gyrocopter'),
+  ('Agusta', 'A119', 'Koala', 'Helicopter / Gyrocopter'),
+  ('Agusta', 'A109', 'Power', 'Helicopter / Gyrocopter')
 ON CONFLICT DO NOTHING;
 
 -- AgustaWestland (2000-2016, before Leonardo rebrand)
 INSERT INTO aircraft_reference_specs (manufacturer, model, variant, category)
 VALUES
-  ('AgustaWestland', 'AW109', NULL, 'Helicopter'),
-  ('AgustaWestland', 'AW119', NULL, 'Helicopter'),
-  ('AgustaWestland', 'AW139', NULL, 'Helicopter'),
-  ('AgustaWestland', 'AW169', NULL, 'Helicopter'),
-  ('AgustaWestland', 'AW189', NULL, 'Helicopter')
+  ('AgustaWestland', 'AW109', NULL, 'Helicopter / Gyrocopter'),
+  ('AgustaWestland', 'AW119', NULL, 'Helicopter / Gyrocopter'),
+  ('AgustaWestland', 'AW139', NULL, 'Helicopter / Gyrocopter'),
+  ('AgustaWestland', 'AW169', NULL, 'Helicopter / Gyrocopter'),
+  ('AgustaWestland', 'AW189', NULL, 'Helicopter / Gyrocopter')
 ON CONFLICT DO NOTHING;
 
 -- Eurocopter (pre-2014, before Airbus Helicopters rebrand)
 INSERT INTO aircraft_reference_specs (manufacturer, model, variant, category)
 VALUES
-  ('Eurocopter', 'EC120', 'Colibri', 'Helicopter'),
-  ('Eurocopter', 'EC130', NULL, 'Helicopter'),
-  ('Eurocopter', 'EC135', NULL, 'Helicopter'),
-  ('Eurocopter', 'EC145', NULL, 'Helicopter'),
-  ('Eurocopter', 'EC155', NULL, 'Helicopter'),
-  ('Eurocopter', 'AS350', 'Ecureuil', 'Helicopter'),
-  ('Eurocopter', 'AS355', NULL, 'Helicopter'),
-  ('Eurocopter', 'AS365', 'Dauphin', 'Helicopter'),
-  ('Eurocopter', 'BK117', NULL, 'Helicopter')
+  ('Eurocopter', 'EC120', 'Colibri', 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'EC130', NULL, 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'EC135', NULL, 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'EC145', NULL, 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'EC155', NULL, 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'AS350', 'Ecureuil', 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'AS355', NULL, 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'AS365', 'Dauphin', 'Helicopter / Gyrocopter'),
+  ('Eurocopter', 'BK117', NULL, 'Helicopter / Gyrocopter')
 ON CONFLICT DO NOTHING;
 
 -- MBB (Messerschmitt-Bölkow-Blohm, merged into Eurocopter)
 INSERT INTO aircraft_reference_specs (manufacturer, model, variant, category)
 VALUES
-  ('MBB', 'Bo 105', NULL, 'Helicopter'),
-  ('MBB', 'BK 117', NULL, 'Helicopter')
+  ('MBB', 'Bo 105', NULL, 'Helicopter / Gyrocopter'),
+  ('MBB', 'BK 117', NULL, 'Helicopter / Gyrocopter')
 ON CONFLICT DO NOTHING;
 
 -- Aerospatiale (merged into Eurocopter)
 INSERT INTO aircraft_reference_specs (manufacturer, model, variant, category)
 VALUES
-  ('Aerospatiale', 'SA 341', 'Gazelle', 'Helicopter'),
-  ('Aerospatiale', 'SA 365', 'Dauphin', 'Helicopter'),
-  ('Aerospatiale', 'AS 350', 'Ecureuil', 'Helicopter')
+  ('Aerospatiale', 'SA 341', 'Gazelle', 'Helicopter / Gyrocopter'),
+  ('Aerospatiale', 'SA 365', 'Dauphin', 'Helicopter / Gyrocopter'),
+  ('Aerospatiale', 'AS 350', 'Ecureuil', 'Helicopter / Gyrocopter')
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
--- STEP 2: Ensure all helicopter manufacturers have category = 'Helicopter'
+-- STEP 2: Ensure all helicopter manufacturers have category = 'Helicopter / Gyrocopter'
 -- ============================================================================
 
-UPDATE aircraft_reference_specs SET category = 'Helicopter'
+UPDATE aircraft_reference_specs SET category = 'Helicopter / Gyrocopter'
 WHERE manufacturer IN (
   'Robinson', 'Airbus Helicopters', 'Bell', 'Leonardo',
   'MD Helicopters', 'Sikorsky', 'Enstrom', 'Guimbal', 'Schweizer', 'Kopter',
@@ -78,7 +78,7 @@ WHERE manufacturer IN (
   -- Legacy names
   'Agusta', 'AgustaWestland', 'Eurocopter', 'MBB', 'Aerospatiale'
 )
-AND (category IS NULL OR category != 'Helicopter');
+AND (category IS NULL OR category != 'Helicopter / Gyrocopter');
 
 -- ============================================================================
 -- STEP 3: Fix existing aircraft_listings using reference_specs as truth
@@ -120,7 +120,7 @@ WHERE al.manufacturer_id = correct_cat.manufacturer_id
 -- Also fix by headline keyword matching for manufacturers not yet in
 -- aircraft_manufacturers table (e.g. "Agusta" might not have a manufacturer_id)
 UPDATE aircraft_listings
-SET category_id = (SELECT id FROM aircraft_categories WHERE name = 'Helicopter' LIMIT 1),
+SET category_id = (SELECT id FROM aircraft_categories WHERE name = 'Helicopter / Gyrocopter' LIMIT 1),
     updated_at = now()
 WHERE is_external = true
   AND category_id IN (

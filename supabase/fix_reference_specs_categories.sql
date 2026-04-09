@@ -93,7 +93,7 @@ WHERE (manufacturer = 'Gulfstream' AND model = 'G700')
    OR (manufacturer = 'Embraer' AND model LIKE 'Legacy%');
 
 -- Helicopter (includes legacy brand names: Agusta→Leonardo, Eurocopter→Airbus Helicopters)
-UPDATE public.aircraft_reference_specs SET category = 'Helicopter'
+UPDATE public.aircraft_reference_specs SET category = 'Helicopter / Gyrocopter'
 WHERE manufacturer IN ('Robinson', 'Airbus Helicopters', 'Bell', 'Leonardo',
   'MD Helicopters', 'Sikorsky', 'Enstrom', 'Guimbal', 'Schweizer', 'Kopter',
   'AutoGyro', 'Magni', 'ELA Aviacion', 'Trendak', 'RotorSchmiede', 'ArrowCopter',

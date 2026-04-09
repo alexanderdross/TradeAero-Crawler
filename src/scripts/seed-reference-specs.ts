@@ -1033,8 +1033,22 @@ async function main() {
       const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       const specs = JSON.parse(jsonStr);
 
+      // Normalize category name variants returned by Claude
+      const CATEGORY_ALIASES: Record<string, string> = {
+        "Helicopter": "Helicopter / Gyrocopter",
+        "Gyrocopter": "Helicopter / Gyrocopter",
+        "Light Sport Aircraft": "Ultralight / Light Sport Aircraft (LSA)",
+        "Ultralight": "Ultralight / Light Sport Aircraft (LSA)",
+        "LSA": "Ultralight / Light Sport Aircraft (LSA)",
+        "Experimental": "Experimental / Homebuilt",
+        "Homebuilt": "Experimental / Homebuilt",
+        "Microlight": "Microlight / Flex-Wing",
+        "Flex-Wing": "Microlight / Flex-Wing",
+      };
+      const normalizedCategory = CATEGORY_ALIASES[specs.category] ?? specs.category;
+
       // Validate category — must be one of the known values
-      const assignedCategory = VALID_CATEGORIES.includes(specs.category) ? specs.category : null;
+      const assignedCategory = VALID_CATEGORIES.includes(normalizedCategory) ? normalizedCategory : null;
 
       // Insert into DB
       const { error } = await supabase.from("aircraft_reference_specs").insert({
