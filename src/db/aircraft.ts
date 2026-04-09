@@ -182,7 +182,18 @@ function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: str
   return null;
 }
 
-async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null): Promise<string | null> {
+async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null, registration?: string | null): Promise<string | null> {
+  // 0. Registration prefix override (German registrations are authoritative)
+  //    D-E = Single Engine Piston, D-I = Multi Engine Piston, D-G = Glider,
+  //    D-M = Microlight/UL, D-K = Motorglider
+  if (registration) {
+    const reg = registration.toUpperCase().replace(/\s+/g, "");
+    if (/^D-E[A-Z]{2,3}$/.test(reg)) return "Single Engine Piston";
+    if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston";
+    if (/^D-G[A-Z]{2,3}$/.test(reg)) return "Glider";
+    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Motorglider";
+  }
+
   // 1. Reference specs lookup takes priority — the table has correct category
   //    for every known manufacturer+model combo (475+ entries).
   //    This prevents e.g. Mooney/Piper/Agusta being miscategorized as LSA
@@ -407,7 +418,7 @@ export async function upsertAircraftListing(
     // Extract clean model name from title (prefers reference spec match)
     const modelName = extractModelFromTitle(cleanTitle, manufacturerName, refSpecs as any);
 
-    const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName);
+    const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName, listing.registration);
     const categoryId = detectedCategoryName ? await getCategoryId(detectedCategoryName) : null;
 
     // Dedup
