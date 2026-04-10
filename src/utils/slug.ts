@@ -40,22 +40,33 @@ export function generateSlug(text: string, listingNumber?: number): string {
     // Strip diacritics from Latin chars
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    // Keep only alphanumeric and hyphens
+    // Collapse any run of non-alphanumeric characters to a single hyphen
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 
-  // Avoid cutting mid-word: truncate at last hyphen if within last 20 chars
+  // Avoid cutting mid-word: truncate at last hyphen if within last 20 chars.
+  // Also strip any trailing hyphen that `slice(0, 80)` may have left behind
+  // (the slice boundary can land immediately before a hyphen, leaving a
+  // dangling `-` that would concatenate with the `-${listingNumber}` suffix
+  // below to produce an illegal `--` in the final slug).
   if (slug.length === 80) {
     const lastHyphen = slug.lastIndexOf("-");
     if (lastHyphen >= 60) {
       slug = slug.slice(0, lastHyphen);
     }
   }
+  slug = slug.replace(/-+$/g, "");
 
   if (listingNumber) {
     slug = `${slug}-${listingNumber}`;
   }
+
+  // Final defensive pass — guarantee no consecutive hyphens and no
+  // leading/trailing hyphens survive in the returned slug regardless of
+  // how we got here (truncation edge cases, source text quirks, etc.).
+  slug = slug.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+
   return slug;
 }
 
