@@ -205,36 +205,104 @@ function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: str
 
   // Turboprop
   if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop") ||
-      t.includes("king air") || t.includes("tbm ") || t.includes("pc-12") || t.includes("caravan")) return "Turboprop";
+      t.includes("king air") || t.includes("tbm ") || t.includes("pc-12") || t.includes("caravan") ||
+      t.includes("meridian") || t.includes("cheyenne") || t.includes("conquest") ||
+      t.includes("epic e1000") || t.includes("kodiak")) return "Turboprop";
 
   // Jet
+  // Matches well-known business-jet family names. "canadair" is added so
+  // "Canadair Challenger 604" resolves even if "challenger" is not hit first.
   if (url.includes("/jet") || t.match(/\bjet\b/) || t.includes("citation") ||
       t.includes("phenom") || t.includes("learjet") || t.includes("gulfstream") ||
-      t.includes("falcon ") || t.includes("challenger") || t.includes("global ")) return "Jet";
+      t.includes("falcon ") || t.includes("challenger") || t.includes("global ") ||
+      t.includes("canadair") || t.includes("hondajet") || t.includes("hawker") ||
+      t.includes("praetor") || t.includes("legacy 5") || t.includes("legacy 6") ||
+      t.includes("latitude") || t.includes("longitude") || t.includes("beechjet") ||
+      t.includes("embraer ") || t.includes("bombardier ") || t.includes("sf50") ||
+      t.includes("vision jet")) return "Jet";
 
   // Multi Engine Piston
   if (t.includes("twin") || t.includes("multi engine") || t.includes("zweimotorig") ||
       t.includes("baron") || t.includes("seneca") || t.includes("seminole") ||
       t.includes("duchess") || t.includes("apache") || url.includes("/multiprop") ||
-      url.includes("/mehrmotorig")) return "Multi Engine Piston";
+      url.includes("/mehrmotorig") || t.includes("da42") || t.includes("da62") ||
+      t.includes("p2006") || t.includes("tecnam p2006") || t.includes("cessna 310") ||
+      t.includes("cessna 340") || t.includes("cessna 414") || t.includes("cessna 421") ||
+      t.includes("piper aztec") || t.includes("piper navajo")) return "Multi Engine Piston";
 
-  // Single Engine Piston (common keywords)
-  if (url.includes("/singleprop") || url.includes("/einmotorig") ||
-      url.includes("/kolbenmotorflugzeug")) return "Single Engine Piston";
+  // Single Engine Piston (common keywords + iconic model families)
+  // Added: Yakovlev (Yak-11/18/50/52/55), Nanchang CJ-6, Zlin, Extra, One Design,
+  // CAP, Pitts, Sukhoi sport, and other trainers/aerobatic singles that had
+  // no keyword coverage and were landing with a null category.
+  if (
+    url.includes("/singleprop") || url.includes("/einmotorig") ||
+    url.includes("/kolbenmotorflugzeug") ||
+    // Russian / Soviet aerobatic and trainer singles
+    /\byak[-\s]?(3|7|9|11|18|50|52|54|55)\b/.test(t) || t.includes("yakovlev") ||
+    t.includes("sukhoi su-26") || t.includes("sukhoi su-29") || t.includes("sukhoi su-31") ||
+    t.includes("nanchang") || /\bcj-?6\b/.test(t) ||
+    // Czech / European aerobatic + trainer singles
+    /\bzlin\b/.test(t) || /\bz-?(42|43|50|142|143|242|526|726)\b/.test(t) ||
+    // Aerobatic singles
+    t.includes("extra 200") || t.includes("extra 300") || t.includes("extra 330") ||
+    t.includes("cap 10") || t.includes("cap 20") || t.includes("cap 21") || t.includes("cap 232") ||
+    t.includes("pitts ") || t.includes("one design") || t.includes("mxs-r") ||
+    t.includes("gamebird") ||
+    // Iconic single-engine piston production aircraft
+    t.includes("cessna 150") || t.includes("cessna 152") || t.includes("cessna 170") ||
+    t.includes("cessna 172") || t.includes("cessna 175") || t.includes("cessna 177") ||
+    t.includes("cessna 180") || t.includes("cessna 182") || t.includes("cessna 185") ||
+    t.includes("cessna 195") || t.includes("cessna 205") || t.includes("cessna 206") ||
+    t.includes("cessna 207") || t.includes("cessna 210") ||
+    t.includes("piper pa-18") || t.includes("piper pa-22") || t.includes("piper pa-24") ||
+    t.includes("piper pa-28") || t.includes("piper pa-32") || t.includes("piper pa-46") ||
+    t.includes("cherokee") || t.includes("warrior") || t.includes("archer") ||
+    t.includes("dakota") || t.includes("saratoga") || t.includes("lance ") ||
+    t.includes("arrow") || t.includes("cub") ||
+    t.includes("bonanza") || t.includes("debonair") || t.includes("musketeer") ||
+    t.includes("sundowner") || t.includes("sierra") ||
+    t.includes("mooney m20") || t.includes("mooney ovation") || t.includes("mooney acclaim") ||
+    t.includes("cirrus sr") || t.includes("sr20") || t.includes("sr22") ||
+    t.includes("diamond da20") || t.includes("diamond da40") ||
+    t.includes("robin dr") || /\bdr[- ]?400\b/.test(t) ||
+    t.includes("grumman aa") || t.includes("tiger aa5") ||
+    t.includes("bellanca ") || t.includes("stinson ") ||
+    // Historical / warbird singles (most are piston)
+    t.includes("t-6 texan") || t.includes("harvard") || t.includes("t-34 mentor") ||
+    t.includes("nord 3202") || t.includes("fouga magister") || t.includes("chipmunk")
+  ) return "Single Engine Piston";
 
   // Experimental / Homebuilt
   if (t.includes("experimental") || t.includes("eigenbau") || t.includes("homebuilt") ||
       t.includes("kit-built") || t.includes("kitbuilt") || t.includes("selbstbau") ||
-      url.includes("/experimental")) return "Experimental / Homebuilt";
+      url.includes("/experimental") || /\brv-?(3|4|6|7|8|9|10|12|14)\b/.test(t) ||
+      t.includes("lancair") || t.includes("glasair") || t.includes("sonex") ||
+      t.includes("kitfox")) return "Experimental / Homebuilt";
 
   // Commercial Airliner
   if (t.includes("airliner") || t.includes("verkehrsflugzeug") || t.includes("boeing 7") ||
       t.includes("airbus a3")) return "Commercial Airliner";
 
   // Ultralight / LSA (broadest match — last to avoid false positives)
-  if (url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
-      url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
-      t.includes(" ul ") || t.match(/\bul\b/) || t.match(/\blsa\b/)) return "Ultralight / Light Sport Aircraft (LSA)";
+  // Added common modern LSA / UL manufacturers so they resolve without
+  // needing a reference-specs entry.
+  if (
+    url.includes("/ul-") || url.includes("/ultraleicht") || url.includes("ul-flugzeug") ||
+    url.includes("helmuts-ul-seiten.de") || t.includes("ultralight") || t.includes("ultraleicht") ||
+    t.includes(" ul ") || t.match(/\bul\b/) || t.match(/\blsa\b/) ||
+    // Common LSA / UL brands and models
+    t.includes("sonaca") || t.includes("flight design ct") || t.includes("flight design f") ||
+    t.includes("comco ikarus") || t.includes("ikarus c42") || t.includes("ikarus c-42") ||
+    t.includes("c42") || t.includes("breezer") || t.includes("bristell") ||
+    t.includes("shark aero") || t.includes("blackshape") || t.includes("lambada") ||
+    t.includes("wt-9") || t.includes("wt9") || t.includes("dynamic wt") ||
+    t.includes("fk9") || t.includes("fk 9") || t.includes("fk14") || t.includes("fk 14") ||
+    t.includes("fk-lightplanes") || t.includes("b&f fk") ||
+    t.includes("eurofox") || t.includes("eurostar") || t.includes("p92") || t.includes("p2002") ||
+    t.includes("tecnam p92") || t.includes("tecnam p2002") || t.includes("tecnam p96") ||
+    t.includes("savannah") || t.includes("savage cub") || t.includes("sportcruiser") ||
+    t.includes("piper sport") || t.includes("virus sw") || t.includes("pipistrel")
+  ) return "Ultralight / Light Sport Aircraft (LSA)";
 
   return null;
 }
@@ -589,6 +657,16 @@ export async function upsertAircraftListing(
 
     // Images (new listings only)
     const images = existing ? [] : await uploadImages(listing.imageUrls, cleanTitle, "aircraft-images");
+
+    // Gate new listings on successful image upload. The earlier check at
+    // listing.imageUrls.length verified the source had image URLs, but those
+    // downloads can still fail (timeout, 403, invalid format, domain block).
+    // A listing with zero successfully-uploaded images produces a broken
+    // marketplace card and should be skipped, not inserted.
+    if (!existing && images.length === 0) {
+      logger.debug(`Skipping new listing — no images uploaded successfully: "${cleanTitle}"`);
+      return "skipped";
+    }
 
     // Extract structured data from description
     const extracted = await extractStructuredData(cleanTitle, listing.description ?? "");
