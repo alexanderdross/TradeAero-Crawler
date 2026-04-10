@@ -258,12 +258,23 @@ function extractSpecs(text: string): ExtractedSpecs {
   if (dulvMatch) specs.dulv = cleanText(dulvMatch[1]);
 
   // Registration / Kennzeichen
-  const regKennMatch = text.match(/(?:Kennzeichen|Kennz\.?|Zulassung)[:\s]*([A-Z]{1,2}-[A-Z0-9]{2,5})/i);
+  //
+  // Prefer a labeled match ("Kennzeichen: D-MABC") over a free-text match
+  // so unrelated tokens that look like a registration (e.g. "ISO-9001",
+  // "DULV-4567", "PMA-12345") don't get picked up as the aircraft
+  // registration. The free-text fallback is restricted to known aircraft
+  // registration prefixes (D, OE, HB, G, F, I, N, SP, OY, OK, SE, LN, PH,
+  // etc.) to avoid catching certification codes and part numbers.
+  const regKennMatch = text.match(/(?:Kennzeichen|Kennz\.?|Zulassung|Registration)[:\s]*([A-Z]{1,2}-[A-Z0-9]{2,5})/i);
   if (regKennMatch) {
-    specs.registration = regKennMatch[1];
+    specs.registration = regKennMatch[1].toUpperCase();
   } else {
-    const regFreeMatch = text.match(/\b([A-Z]{1,2}-[A-Z0-9]{2,5})\b/);
-    if (regFreeMatch) specs.registration = regFreeMatch[1];
+    // Free-text fallback: only match tokens that start with a known
+    // ICAO national prefix to avoid "ISO-9001" / "DULV-4567" false positives.
+    const regFreeMatch = text.match(
+      /\b(D-[A-Z0-9]{3,4}|OE-[A-Z]{3}|HB-[A-Z]{3}|G-[A-Z]{4}|F-[A-Z]{4}|I-[A-Z]{4}|N[0-9]{1,5}[A-Z]{0,2}|SP-[A-Z]{3}|OY-[A-Z]{3}|OK-[A-Z]{3}|SE-[A-Z]{3}|LN-[A-Z]{3}|PH-[A-Z]{3})\b/,
+    );
+    if (regFreeMatch) specs.registration = regFreeMatch[1].toUpperCase();
   }
 
   // Serial number / Werk-Nr.

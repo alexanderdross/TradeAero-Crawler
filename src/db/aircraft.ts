@@ -181,10 +181,27 @@ function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: str
       t.includes("motor glider") || t.includes("tmg")) return "Glider";
 
   // Microlight / Flex-Wing / Trike
-  if (t.includes("trike") || t.includes("flex-wing") || t.includes("flexwing") ||
-      t.includes("paramotor") || t.includes("motorschirm") || t.includes("drachen") ||
-      t.includes("hängegleiter") || t.includes("weight-shift") || t.includes("drachenfläche") ||
-      url.includes("/trike")) return "Microlight / Flex-Wing";
+  //
+  // Important: keywords are narrowed to avoid false positives. The
+  // Microlight/Flex-Wing category is strictly for weight-shift aircraft
+  // (hang gliders, paragliders, trikes) — NOT for fixed-wing ULs or LSAs.
+  //
+  // Previous version matched bare "drachen" (German for dragon/kite),
+  // which caused false positives on listings mentioning the word in
+  // unrelated contexts (model names, addresses, descriptions). We now
+  // require the more specific "drachenflieger" (hang-glider pilot) or
+  // "hängedrachen" (hang glider) compounds.
+  //
+  // "trike" is now also narrowed — a bare substring match would hit
+  // words like "trikeshaw" or fragments of unrelated words. We use a
+  // word-boundary regex to require "trike" as a standalone word.
+  if (
+    /\btrike\b/.test(t) || t.includes("flex-wing") || t.includes("flexwing") ||
+    t.includes("paramotor") || t.includes("motorschirm") ||
+    t.includes("drachenflieger") || t.includes("hängedrachen") ||
+    t.includes("hängegleiter") || t.includes("weight-shift") || t.includes("drachenfläche") ||
+    url.includes("/trike")
+  ) return "Microlight / Flex-Wing";
 
   // Turboprop
   if (url.includes("/turboprop") || t.includes("turboprop") || t.includes("turbo prop") ||
