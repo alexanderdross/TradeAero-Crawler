@@ -54,6 +54,26 @@ describe("generateSlug", () => {
     expect(generateSlug("@#$%^&*")).toBe("");
   });
 
+  it("never introduces double hyphens around the listing number suffix", () => {
+    // Regression: the crawler used to produce URLs like
+    //   .../brm-aero-bristell-rg-bristell-ul-mit-einziehfahrwerk-dynonavionics-skyviewtouch--2503/
+    // when the body ended in a hyphen after the slice(0, 80) truncation,
+    // and the `-${listingNumber}` suffix was concatenated on top of it.
+    expect(generateSlug("Cessna 172S -", 101)).toBe("cessna-172s-101");
+    expect(generateSlug("Cessna 172S - - -", 101)).toBe("cessna-172s-101");
+    expect(
+      generateSlug(
+        "BRM Aero Bristell RG - Bristell UL mit Einziehfahrwerk Dynonavionics SkyViewTouch",
+        2503,
+      ),
+    ).not.toMatch(/--/);
+    // Explicit check: a title long enough to trigger the slice(0, 80) path
+    // must still produce a single-hyphen suffix.
+    const longTitle =
+      "Ultraleichtflugzeug Bristell UL mit Einziehfahrwerk Dynonavionics SkyViewTouch";
+    expect(generateSlug(longTitle, 2503)).not.toMatch(/--/);
+  });
+
   describe("Cyrillic transliteration (Russian)", () => {
     it("transliterates Russian text", () => {
       expect(generateSlug("Москва")).toBe("moskva");
