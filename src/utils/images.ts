@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash } from "crypto";
 import sharp from "sharp";
 import { supabase } from "../db/client.js";
 import { logger } from "./logger.js";
@@ -160,14 +160,18 @@ async function downloadAndUpload(
 
     const ext = format === "png" ? "png" : "jpg";
     const mimeType = ext === "png" ? "image/png" : "image/jpeg";
-    const fileName = `${randomUUID()}.${ext}`;
+    // Content-hash filename — deterministic, dedupes repeat downloads of the
+    // same source image across re-crawls. 24-hex-char SHA-256 prefix = 96-bit
+    // collision space, ~10⁻²⁰ chance at a million-file corpus. `upsert: true`
+    // lets a re-upload of identical bytes succeed silently instead of erroring.
+    const fileName = `${createHash("sha256").update(buffer).digest("hex").slice(0, 24)}.${ext}`;
     const filePath = `listings/${fileName}`;
 
     const { error } = await supabase.storage
       .from(bucket)
       .upload(filePath, buffer, {
         contentType: mimeType,
-        upsert: false,
+        upsert: true,
       });
 
     if (error) {
