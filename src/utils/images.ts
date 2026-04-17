@@ -27,6 +27,23 @@ const AD_PATTERNS = [
   /doubleclick/i,
 ];
 
+/**
+ * Map each Supabase Storage bucket name to the short public URL alias served
+ * under `<website>/images/<alias>/...` by the Vercel `rewrites()` rule in
+ * TradeAero-Refactor's `next.config.ts`.
+ *
+ * MUST stay in sync with `BUCKET_ALIAS` in TradeAero-Refactor `types/image.ts`
+ * and the rewrite rules in `next.config.ts`. If this diverges from the
+ * website, crawled listings will render broken images until a backfill runs.
+ */
+const BUCKET_ALIAS: Record<string, string> = {
+  "aircraft-images": "aircraft",
+  "rentals-images": "rentals",
+  "parts-images": "parts",
+  "charter-listings": "charter",
+  logos: "logos",
+};
+
 /** JPEG magic bytes: FF D8 FF */
 const JPEG_MAGIC = [0xff, 0xd8, 0xff];
 /** PNG magic bytes: 89 50 4E 47 */
@@ -158,13 +175,17 @@ async function downloadAndUpload(
       return null;
     }
 
-    const { data: publicData } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(filePath);
+    // Store the short bucket-aliased form ("aircraft/<uuid>.jpg") rather than
+    // an absolute URL. The website's Next.js `rewrites()` proxies this to
+    // Supabase Storage so image URLs live under `trade.aero/images/...` and
+    // the DB stays decoupled from the storage host. Falls back to the raw
+    // bucket string for unknown buckets so we never silently drop data.
+    const alias = BUCKET_ALIAS[bucket] ?? bucket;
+    const shortUrl = `${alias}/${fileName}`;
 
-    logger.debug("Uploaded image", { sourceUrl, storagePath: filePath });
+    logger.debug("Uploaded image", { sourceUrl, storagePath: filePath, shortUrl });
     // Use alt_text key to match refactor app's ImageWithMeta normalizer
-    return { url: publicData.publicUrl, alt_text: altText };
+    return { url: shortUrl, alt_text: altText };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn("Image download/upload error", { sourceUrl, error: msg });
