@@ -7,6 +7,13 @@ export interface SourceConfig {
   parts: string[];
   /** Use Bright Data proxy for this source (default: false) */
   useProxy?: boolean;
+  /**
+   * Queue a claim-invite candidate row every time a NEW listing from this
+   * source is inserted. The Refactor-side cron drains the queue behind a
+   * kill switch + legal gate. v1 scope: Helmut only. See
+   * TradeAero-Refactor/docs/COLD_EMAIL_CLAIM_CONCEPT.md §8.
+   */
+  sendColdEmailInvite?: boolean;
 }
 
 export const config = {
@@ -35,6 +42,7 @@ export const config = {
       ],
       parts: ["https://www.helmuts-ul-seiten.de/verkauf2.html"],
       useProxy: false,
+      sendColdEmailInvite: true,
     },
     aircraft24: {
       name: "aircraft24.de",
