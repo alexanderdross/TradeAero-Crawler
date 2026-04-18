@@ -8,6 +8,7 @@ import { LANGS, buildLocaleFields } from "./locale-helpers.js";
 import { lookupReferenceSpecs, applyReferenceSpecs, lookupCategoryFromRefSpecs } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
 import { stripTitleDatePrefix } from "../parsers/shared.js";
+import { enqueueInviteCandidate } from "./invite-candidates.js";
 
 let manufacturerCache: Map<string, number> | null = null;
 let refSpecManufacturers: string[] | null = null;
@@ -805,6 +806,14 @@ export async function upsertAircraftListing(
     }
 
     logger.info(`Inserted aircraft id=${(inserted as any).id} title="${cleanTitle}"`);
+
+    // Queue claim-invite candidate for sources with sendColdEmailInvite=true.
+    // Never blocks or fails the crawl; surface errors in the helper's logger.
+    await enqueueInviteCandidate({
+      listingId: (inserted as any).id,
+      contactEmail: listing.contactEmail,
+      sourceName: listing.sourceName,
+    });
 
     if (manufacturerName) await seedReferenceEntry(manufacturerName, cleanTitle);
     return "inserted";
