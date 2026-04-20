@@ -654,7 +654,24 @@ export async function upsertAircraftListing(
 
     // Dedup
     const { data: existing } = await supabase
-      .from("aircraft_listings").select("id").eq("source_url", listing.sourceId).maybeSingle();
+      .from("aircraft_listings")
+      .select("id, is_external, claimed_at")
+      .eq("source_url", listing.sourceId)
+      .maybeSingle();
+
+    // Skip-on-claim guard (§8c of COLD_EMAIL_CLAIM_CONCEPT.md).
+    // Once a listing has been claimed by its original seller — via either
+    // the cold-email /claim/[token] flow or the in-app /claim/external/
+    // flow — the row's ownership has transferred to a real user. Re-running
+    // the upsert would clobber their edits and flip is_external back to
+    // true. Detect both flags for defence in depth: either being set is
+    // sufficient to skip.
+    if (existing && (existing.is_external === false || existing.claimed_at)) {
+      logger.info(
+        `Skipping claimed listing (source_url=${listing.sourceId}, is_external=${existing.is_external}, claimed_at=${existing.claimed_at ?? "null"})`,
+      );
+      return "skipped";
+    }
 
     // Images (new listings only)
     const images = existing ? [] : await uploadImages(listing.imageUrls, cleanTitle, "aircraft-images");

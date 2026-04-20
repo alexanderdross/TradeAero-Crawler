@@ -31,12 +31,24 @@ export async function upsertPartsListing(
 ): Promise<"inserted" | "updated" | "skipped"> {
   const { data: existing, error: lookupError } = await supabase
     .from("parts_listings")
-    .select("id, updated_at, images")
+    .select("id, updated_at, images, is_external, claimed_at")
     .eq("source_url", listing.sourceId)
     .maybeSingle();
 
   if (lookupError) {
     logger.error("Dedup lookup failed", { sourceId: listing.sourceId, error: lookupError.message });
+    return "skipped";
+  }
+
+  // Skip-on-claim guard (§8c of COLD_EMAIL_CLAIM_CONCEPT.md). Mirrors the
+  // aircraft-side check in src/db/aircraft.ts. Once a parts listing has
+  // been claimed — by either /claim/[token] or /claim/external/ — the
+  // row belongs to a real user and must not be overwritten by a
+  // subsequent crawl.
+  if (existing && (existing.is_external === false || existing.claimed_at)) {
+    logger.info(
+      `Skipping claimed parts listing (source_url=${listing.sourceId}, is_external=${existing.is_external}, claimed_at=${existing.claimed_at ?? "null"})`,
+    );
     return "skipped";
   }
 
