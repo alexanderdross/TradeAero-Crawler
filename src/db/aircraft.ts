@@ -5,7 +5,7 @@ import { translateListing, type TranslationResult } from "../utils/translate.js"
 import { extractStructuredData, applyExtractedData, deduplicateDescription } from "../utils/extract.js";
 import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
-import { lookupReferenceSpecs, applyReferenceSpecs, lookupCategoryFromRefSpecs } from "./reference-specs.js";
+import { lookupReferenceSpecs, applyReferenceSpecs, lookupCategoryFromRefSpecs, scanHeadlineForKnownModel } from "./reference-specs.js";
 import type { ParsedAircraftListing } from "../types.js";
 import { stripTitleDatePrefix } from "../parsers/shared.js";
 import { enqueueInviteCandidate } from "./invite-candidates.js";
@@ -142,23 +142,52 @@ function extractModelFromTitle(
   return model.slice(0, 80);
 }
 
-/** Check if a model string is clean (not engine name, registration, price, etc.) */
+/**
+ * Check if a model string is clean (not engine name, registration, price,
+ * German filler, or a description fragment).
+ *
+ * Hardened per docs/CRAWLER_HANDOVER_CATEGORY_MODEL_DEDUP.md Task 1 — engine
+ * strings (Rotax 912 ULS, Continental IO-550, Lycoming O-320, Jabiru 2200)
+ * and crawler filler (Demoflugzeug, Einziehfahrwerk, DynonAvionics, Bj.,
+ * TTAF, versteuert, AIRCH) must never land in `aircraft_listings.model`.
+ */
 function isCleanModel(model: string): boolean {
   if (!model || model.length < 2) return false;
-  // Engine names
-  if (/^(rotax|lycoming|continental|jabiru|hirth|polini|bmw)\b/i.test(model)) return false;
-  // Engine patterns: "912 ULS", "912S", "582"
-  if (/^(912|914|582|503|447)\b/i.test(model)) return false;
-  // Registration numbers: D-MXXX, D-EXXX, HB-XXX, OE-XXX
-  if (/^[A-Z]{1,2}-[A-Z]{2,4}/i.test(model)) return false;
+  const trimmed = model.trim();
+
+  // Engine brand prefixes anywhere at start
+  if (/^(rotax|lycoming|continental|jabiru|hirth|polini|bmw|teledyne|superior)\b/i.test(trimmed)) return false;
+
+  // Rotax engine patterns: "912", "912S", "912 ULS", "912iS", "914 UL", "915is"
+  if (/^\s*(rotax\s*)?91[2456]\s*(i?s|uls|ul|is)?\s*$/i.test(trimmed)) return false;
+  // Small 2-stroke Rotax: 503, 447, 582 (optionally UL/ULS suffix)
+  if (/^\s*(rotax\s*)?(582|503|447)\s*(uls|ul)?\s*$/i.test(trimmed)) return false;
+
+  // Continental engine patterns: O-200, IO-360, IO-470, IO-520, IO-550, TSIO-550
+  if (/^(t?s?io?-?(200|240|300|320|346|360|470|520|540|550))\b/i.test(trimmed)) return false;
+  // Lycoming engine patterns: O-320, IO-360, O-540, IO-540, AEIO-540, TIO-540
+  if (/^(aeio|t?io|o)-?(235|290|320|360|390|480|540|580|720)\b/i.test(trimmed)) return false;
+  // Jabiru engine patterns: 2200, 3300 (bare or "Jabiru 2200")
+  if (/^(jabiru\s*)?(2200|3300)\b/i.test(trimmed)) return false;
+
+  // Registration numbers: D-MXXX, D-EXXX, HB-XXX, OE-XXX, N12345
+  if (/^[A-Z]{1,2}-[A-Z]{2,4}\b/i.test(trimmed)) return false;
+  if (/^N\d{1,5}[A-Z]{0,2}$/i.test(trimmed)) return false;
+
   // Pure price: "26.000", "12500"
-  if (/^\d{1,3}([.,]\d{3})*\s*(€|EUR|,-)?$/i.test(model)) return false;
+  if (/^\d{1,3}([.,]\d{3})*\s*(€|EUR|,-)?$/i.test(trimmed)) return false;
   // Contains email
-  if (/@/.test(model)) return false;
+  if (/@/.test(trimmed)) return false;
+
   // Too many words (likely description fragment)
-  if (model.split(/\s+/).length > 6) return false;
-  // Known garbage keywords
-  if (/\b(zustand|verkauf|baujahr|stunden|preis|motor\b|biete|kaufe|gesucht|aufgabe)/i.test(model)) return false;
+  if (trimmed.split(/\s+/).length > 6) return false;
+
+  // German + English crawler filler / description tokens
+  if (/\b(zustand|verkauf|baujahr|stunden|preis|motor\b|biete|kaufe|gesucht|aufgabe|demoflu(?:gzeug)?|versteuert|ttaf|airch|einziehfahrwerk|dynon(?:avionics)?|skyview|equipment|ausstattung|inklusive|instrument(?:ierung)?|neuwertig)/i.test(trimmed)) return false;
+
+  // "Bj." / "Bj" (German abbreviation for Baujahr, year of build)
+  if (/\bBj\.?\b/i.test(trimmed)) return false;
+
   return true;
 }
 
@@ -308,72 +337,103 @@ function detectCategoryFromUrlAndTitle(sourceUrl: string | undefined, title: str
   return null;
 }
 
+/**
+ * Category lookup by registration prefix (German LBA / Austrian / Swiss).
+ * Returns a category name or null when the registration doesn't carry
+ * enough signal.
+ *
+ * German prefixes (https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen):
+ *   D-A/D-B >20t / 14-20t (Airliner)
+ *   D-C 5.7-14t (Jet — Saab 340, Citation CJ3, Learjet 35)
+ *   D-E single engine <2t (Piper PA-28, Cessna 172, Robin DR400)
+ *   D-F single engine 2-5.7t (PC-12, An-2, Cessna 208)
+ *   D-G multi engine <2t (Diamond DA42 Twin Star, CriCri)
+ *   D-H helicopter (EC 135, EC 145)
+ *   D-I multi engine 2-5.7t (Piaggio Avanti, Citation CJ1+, Piper PA-42)
+ *   D-K motorglider (Grob G 109, Scheibe Falke, Super Dimona)
+ *   D-M ultralight <600kg (FK 9, Ikarus C42, Shark Aero UL)
+ *   D-N non-motorized sport aircraft (hang glider, paraglider)
+ *   D-xxxx pure glider (LS4, K 8, ASK 13, ASK 21, Discus, Astir)
+ */
+function categoryFromRegistrationPrefix(registration: string | null | undefined): string | null {
+  if (!registration) return null;
+  const reg = registration.toUpperCase().replace(/\s+/g, "");
+
+  // German (D-) prefixes
+  if (/^D-[AB][A-Z]{2,3}$/.test(reg)) return "Commercial Airliner";
+  if (/^D-C[A-Z]{2,3}$/.test(reg)) return "Jet";
+  if (/^D-E[A-Z]{2,3}$/.test(reg)) return "Single Engine Piston";
+  if (/^D-F[A-Z]{2,3}$/.test(reg)) return "Turboprop";
+  if (/^D-G[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston";
+  if (/^D-H[A-Z]{2,3}$/.test(reg)) return "Helicopter / Gyrocopter";
+  if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston";
+  if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Glider";
+  if (/^D-M[A-Z]{3}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)";
+  if (/^D-N[A-Z]{3}$/.test(reg)) return "Microlight / Flex-Wing";
+  if (/^D-\d{4}$/.test(reg)) return "Glider";
+
+  // Austrian (OE-)
+  if (/^OE-[AC][A-Z]{2}$/.test(reg)) return "Single Engine Piston";
+  if (/^OE-B[A-Z]{2}$/.test(reg)) return "Commercial Airliner";
+  if (/^OE-[DK][A-Z]{2}$/.test(reg)) return "Single Engine Piston";
+  if (/^OE-E[A-Z]{2}$/.test(reg)) return "Turboprop";
+  if (/^OE-F[A-Z]{2}$/.test(reg)) return "Multi Engine Piston";
+  if (/^OE-G[A-Z]{2}$/.test(reg)) return "Jet";
+  if (/^OE-H[A-Z]{2}$/.test(reg)) return "Jet";
+  if (/^OE-[IL][A-Z]{2}$/.test(reg)) return "Commercial Airliner";
+  if (/^OE-X[A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter";
+  if (/^OE-W[A-Z]{2}$/.test(reg)) return "Single Engine Piston";
+
+  // Swiss (HB-)
+  if (/^HB-[CDEHKNOPSTU][A-Z]{2}$/.test(reg)) return "Single Engine Piston";
+  if (/^HB-F[A-Z]{2}$/.test(reg)) return "Turboprop";
+  if (/^HB-[GL][A-Z]{2}$/.test(reg)) return "Multi Engine Piston";
+  if (/^HB-A[A-Z]{2}$/.test(reg)) return "Turboprop";
+  if (/^HB-[IJ][A-Z]{2}$/.test(reg)) return "Commercial Airliner";
+  if (/^HB-V[A-Z]{2}$/.test(reg)) return "Jet";
+  if (/^HB-M[A-Z]{2}$/.test(reg)) return "Single Engine Piston";
+  if (/^HB-R[A-Z]{2}$/.test(reg)) return "Single Engine Piston";
+  if (/^HB-W[A-Z]{2}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)";
+  if (/^HB-[XZ][A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter";
+  if (/^HB-Y[A-Z]{2}$/.test(reg)) return "Experimental / Homebuilt";
+
+  return null;
+}
+
+/**
+ * Feature flag for Task 2 of docs/CRAWLER_HANDOVER_CATEGORY_MODEL_DEDUP.md.
+ * When `CATEGORY_RESOLUTION_V2=true`, reference-spec lookup runs BEFORE the
+ * registration-prefix rules so a ref-spec match (e.g. Bombardier → Jet)
+ * wins even for German D-registered aircraft whose prefix would otherwise
+ * force a narrower category. Off by default — flip to true after one clean
+ * crawl cycle's diff against the legacy classifier.
+ */
+const CATEGORY_RESOLUTION_V2 = process.env.CATEGORY_RESOLUTION_V2 === "true";
+
 async function detectCategoryName(sourceUrl: string | undefined, title: string, manufacturerName?: string | null, registration?: string | null): Promise<string | null> {
-  // 0. Registration prefix override (German registrations per LBA)
-  //    Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen
-  //    D-A = Aircraft >20t (Commercial Airliner)
-  //    D-B = Aircraft 14-20t (Commercial Airliner)
-  //    D-C = Aircraft 5.7-14t (Jet — Saab 340, Citation CJ3, Learjet 35)
-  //    D-E = Single engine <2t (Piper PA-28, Cessna 172, Robin DR400)
-  //    D-F = Single engine 2-5.7t (PC-12, An-2, Cessna 208)
-  //    D-G = Multi engine <2t (Diamond DA42 Twin Star, CriCri)
-  //    D-H = Helicopter (EC 135, EC 145)
-  //    D-I = Multi engine 2-5.7t (Piaggio Avanti, Citation CJ1+, Piper PA-42)
-  //    D-K = Motorglider (Grob G 109, Scheibe Falke, Super Dimona)
-  //    D-L = Airship (Zeppelin NT)
-  //    D-M = Ultralight <600kg (FK 9, Ikarus C42, Shark Aero UL)
-  //    D-N = Non-motorized sport aircraft (hang glider, paraglider)
-  //    D-xxxx = Glider (LS4, K 8, ASK 13, ASK 21, Discus, Astir)
-  if (registration) {
-    const reg = registration.toUpperCase().replace(/\s+/g, "");
-    if (/^D-[AB][A-Z]{2,3}$/.test(reg)) return "Commercial Airliner";
-    if (/^D-C[A-Z]{2,3}$/.test(reg)) return "Jet";
-    if (/^D-E[A-Z]{2,3}$/.test(reg)) return "Single Engine Piston";
-    if (/^D-F[A-Z]{2,3}$/.test(reg)) return "Turboprop"; // Single engine 2-5.7t → mostly turboprops (PC-12, Caravan)
-    if (/^D-G[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston"; // Multi engine <2t
-    if (/^D-H[A-Z]{2,3}$/.test(reg)) return "Helicopter / Gyrocopter";
-    if (/^D-I[A-Z]{2,3}$/.test(reg)) return "Multi Engine Piston"; // Multi engine 2-5.7t
-    if (/^D-K[A-Z]{2,3}$/.test(reg)) return "Glider"; // Motorglider → Glider category
-    if (/^D-M[A-Z]{3}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)";
-    if (/^D-N[A-Z]{3}$/.test(reg)) return "Microlight / Flex-Wing"; // Hang gliders, paragliders
-    if (/^D-\d{4}$/.test(reg)) return "Glider"; // Pure gliders use numeric registrations
+  if (CATEGORY_RESOLUTION_V2) {
+    // V2 precedence (per handover): ref-spec → registration → url/title
+    const refCategory = await lookupCategoryFromRefSpecs(title, manufacturerName ?? null);
+    if (refCategory) return refCategory;
 
-    // Austrian registrations (OE-xxx)
-    // Source: Austrian LBA registration system
-    if (/^OE-[AC][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-A, OE-C: single engine <2t
-    if (/^OE-B[A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-B: government aircraft
-    if (/^OE-[DK][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-D, OE-K: single engine <2t >3 seats
-    if (/^OE-E[A-Z]{2}$/.test(reg)) return "Turboprop"; // OE-E: single engine 2-5.7t
-    if (/^OE-F[A-Z]{2}$/.test(reg)) return "Multi Engine Piston"; // OE-F: multi engine <5.7t
-    if (/^OE-G[A-Z]{2}$/.test(reg)) return "Jet"; // OE-G: 5.7-14t
-    if (/^OE-H[A-Z]{2}$/.test(reg)) return "Jet"; // OE-H: 14-20t
-    if (/^OE-[IL][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // OE-I, OE-L: >20t
-    if (/^OE-X[A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // OE-X: helicopters
-    if (/^OE-W[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // OE-W: amphibians
+    const regCategory = categoryFromRegistrationPrefix(registration);
+    if (regCategory) return regCategory;
 
-    // Swiss registrations (HB-xxx)
-    // Source: https://de.wikipedia.org/wiki/Luftfahrzeugkennzeichen#Schweiz
-    if (/^HB-[CDEHKNOPSTU][A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-C/D/E/H/K/N/O/P/S/T/U: single engine <5.7t
-    if (/^HB-F[A-Z]{2}$/.test(reg)) return "Turboprop"; // HB-F: Swiss production (Pilatus PC-6, PC-12)
-    if (/^HB-[GL][A-Z]{2}$/.test(reg)) return "Multi Engine Piston"; // HB-G/L: twin engine <5.7t
-    if (/^HB-A[A-Z]{2}$/.test(reg)) return "Turboprop"; // HB-A: twin turboprop 5.7-15t
-    if (/^HB-[IJ][A-Z]{2}$/.test(reg)) return "Commercial Airliner"; // HB-I/J: >15t
-    if (/^HB-V[A-Z]{2}$/.test(reg)) return "Jet"; // HB-V: business jets <15t
-    if (/^HB-M[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-M: aerobatic
-    if (/^HB-R[A-Z]{2}$/.test(reg)) return "Single Engine Piston"; // HB-R: vintage/oldtimer
-    if (/^HB-W[A-Z]{2}$/.test(reg)) return "Ultralight / Light Sport Aircraft (LSA)"; // HB-W: ecolight
-    if (/^HB-[XZ][A-Z]{2}$/.test(reg)) return "Helicopter / Gyrocopter"; // HB-X/Z: helicopters
-    if (/^HB-Y[A-Z]{2}$/.test(reg)) return "Experimental / Homebuilt"; // HB-Y: experimental
+    return detectCategoryFromUrlAndTitle(sourceUrl, title);
   }
 
-  // 1. Reference specs lookup takes priority — the table has correct category
-  //    for every known manufacturer+model combo (475+ entries).
-  //    This prevents e.g. Mooney/Piper/Agusta being miscategorized as LSA
-  //    just because they appear on helmuts-ul-seiten.de.
+  // Legacy precedence (default): registration → ref-spec → url/title
+  const regCategory = categoryFromRegistrationPrefix(registration);
+  if (regCategory) return regCategory;
+
+  // Reference specs lookup — the table has correct category for every known
+  // manufacturer+model combo (475+ entries), preventing e.g. Mooney/Piper/
+  // Agusta from being miscategorized as LSA just because they appear on
+  // helmuts-ul-seiten.de.
   const refCategory = await lookupCategoryFromRefSpecs(title, manufacturerName ?? null);
   if (refCategory) return refCategory;
 
-  // 2. Fallback to URL/title keyword heuristics (for new/unknown manufacturers)
+  // Last resort: URL/title keyword heuristics for new/unknown manufacturers.
   return detectCategoryFromUrlAndTitle(sourceUrl, title);
 }
 
@@ -647,7 +707,27 @@ export async function upsertAircraftListing(
     const refSpecs = await lookupReferenceSpecs(cleanTitle, listing.description ?? "", listing.engine ?? null);
 
     // Extract clean model name from title (prefers reference spec match)
-    const modelName = extractModelFromTitle(cleanTitle, manufacturerName, refSpecs as any);
+    let modelName = extractModelFromTitle(cleanTitle, manufacturerName, refSpecs as any);
+
+    // Task 1 fallback (per docs/CRAWLER_HANDOVER_CATEGORY_MODEL_DEDUP.md):
+    // When no ref-spec scored high enough to classify AND the extracted
+    // model still looks like a raw headline fragment (too many words, too
+    // long, or engine/garbage survived), scan the headline against all
+    // ref-spec models for this manufacturer and pick the longest match.
+    // This recovers clean names like "NG5" or "B23" when the headline is
+    // polluted with spec dumps ("BRM Aero Bristell RG Bristell UL mit
+    // Einziehfahrwerk, DynonAvionics SkyViewTouch Display").
+    const modelLooksRaw = !(refSpecs as { ref_model?: string } | null)?.ref_model
+      && (modelName.length > 40 || modelName.split(/\s+/).length > 4 || !isCleanModel(modelName));
+    if (modelLooksRaw) {
+      const scanned = await scanHeadlineForKnownModel(cleanTitle, manufacturerName);
+      if (scanned && scanned.length <= 80) {
+        logger.info(
+          `Model fallback via ref-spec headline scan: "${modelName.slice(0, 60)}" → "${scanned}" (manufacturer=${manufacturerName ?? "?"})`,
+        );
+        modelName = scanned;
+      }
+    }
 
     const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName, listing.registration);
     const categoryId = detectedCategoryName ? await getCategoryId(detectedCategoryName) : null;
@@ -826,7 +906,15 @@ export async function upsertAircraftListing(
     const { data: inserted, error } = await supabase.from("aircraft_listings")
       .insert(record).select("id, slug, listing_number").single();
     if (error) {
-      const level = error.message?.includes("check constraint") ? "warn" : "error";
+      const msg = error.message ?? "";
+      // Benign errors: DB check constraints, and the Task-3 unique-source_url
+      // index firing because a concurrent crawl already inserted this row.
+      // Neither is a bug worth paging on; skip the listing and move on.
+      const benign =
+        msg.includes("check constraint") ||
+        msg.includes("duplicate key") ||
+        msg.includes("source_url_unique");
+      const level = benign ? "warn" : "error";
       logger[level](`Failed to insert aircraft "${cleanTitle}": ${error.message}`);
       return "skipped";
     }

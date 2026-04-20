@@ -141,7 +141,7 @@ node dist/index.js --source aeromarkt --target parts
 
 All crawler workflows use quoted workflow input interpolation (`"${{ github.event.inputs.target || 'all' }}"`) to prevent injection.
 
-## Schema Extensions (5 SQL migrations)
+## Schema Extensions (6 SQL migrations)
 
 Run in order in Supabase SQL Editor:
 
@@ -150,6 +150,7 @@ Run in order in Supabase SQL Editor:
 3. **`add_cost_tracking_columns.sql`** -- `proxy_bytes_transferred`, `translation_input_tokens`, `translation_output_tokens` on `crawler_runs`
 4. **`add_aircraft_reference_specs.sql`** -- `aircraft_reference_specs` reference performance data table
 5. **`fix_reference_specs_categories.sql`** -- Fix category assignments in reference specs
+6. **`add_source_url_unique_index.sql`** -- Partial UNIQUE INDEX on `source_url` for active/paused listings (Task 3 of `docs/CRAWLER_HANDOVER_CATEGORY_MODEL_DEDUP.md`)
 
 ## Security Measures
 
