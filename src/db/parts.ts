@@ -131,7 +131,14 @@ export async function upsertPartsListing(
     .single();
 
   if (error) {
-    const level = error.message?.includes("check constraint") ? "warn" : "error";
+    const msg = error.message ?? "";
+    // Benign: DB check constraints and the Task-3 unique-source_url index
+    // firing on a concurrent crawl. Skip the listing, don't page anyone.
+    const benign =
+      msg.includes("check constraint") ||
+      msg.includes("duplicate key") ||
+      msg.includes("source_url_unique");
+    const level = benign ? "warn" : "error";
     logger[level]("Failed to insert parts listing", {
       sourceId: listing.sourceId,
       error: error.message,
