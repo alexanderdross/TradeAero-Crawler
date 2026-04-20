@@ -828,6 +828,7 @@ export async function upsertAircraftListing(
     // Never blocks or fails the crawl; surface errors in the helper's logger.
     await enqueueInviteCandidate({
       listingId: (inserted as any).id,
+      listingType: "aircraft",
       contactEmail: listing.contactEmail,
       sourceName: listing.sourceName,
     });
