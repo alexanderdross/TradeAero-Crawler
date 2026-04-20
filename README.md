@@ -108,6 +108,7 @@ Run in order in Supabase SQL Editor:
 3. `supabase/add_cost_tracking_columns.sql`
 4. `supabase/add_aircraft_reference_specs.sql`
 5. `supabase/fix_reference_specs_categories.sql`
+6. `supabase/add_source_url_unique_index.sql`
 
 ## Documentation
 
