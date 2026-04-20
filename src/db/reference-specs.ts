@@ -236,3 +236,51 @@ export async function lookupCategoryFromRefSpecs(
   const mfgEntry = cache.find(e => e.manufacturer === mfgLower && e.category);
   return mfgEntry?.category ?? null;
 }
+
+/**
+ * Task 1 fallback (per docs/CRAWLER_HANDOVER_CATEGORY_MODEL_DEDUP.md): scan
+ * a polluted headline for any known model in `aircraft_reference_specs`.
+ *
+ * Used when `lookupReferenceSpecs()` didn't score high enough for a full
+ * match but the headline still contains a clean model name (e.g. "NG5",
+ * "B23") surrounded by filler. Returns the longest matching model (with
+ * variant, if any) so specific variants ("A32 Vixxen") beat bare model
+ * names ("A32").
+ *
+ * When `manufacturerName` is supplied, the scan is restricted to that
+ * manufacturer's ref-spec rows — prevents cross-manufacturer false
+ * positives like "NG" matching a bare model from another brand.
+ */
+export async function scanHeadlineForKnownModel(
+  headline: string,
+  manufacturerName: string | null,
+): Promise<string | null> {
+  const cache = await loadCache();
+  if (!cache || cache.length === 0) return null;
+
+  const mfgLower = manufacturerName?.toLowerCase() ?? null;
+  const hay = ` ${headline.toLowerCase()} `;
+
+  let best: { full: string; length: number } | null = null;
+
+  for (const entry of cache) {
+    if (mfgLower && entry.manufacturer !== mfgLower) continue;
+    if (!entry.model_orig || entry.model.length < 2) continue;
+
+    const full = entry.variant_orig
+      ? `${entry.model_orig} ${entry.variant_orig}`
+      : entry.model_orig;
+    const needle = full.toLowerCase();
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Non-alphanumeric boundary on both sides (consistent with the helper
+    // described in the handover doc).
+    const re = new RegExp(`[^a-z0-9]${escaped}[^a-z0-9]`, "i");
+    if (!re.test(hay)) continue;
+
+    if (!best || full.length > best.length) {
+      best = { full, length: full.length };
+    }
+  }
+
+  return best?.full ?? null;
+}
