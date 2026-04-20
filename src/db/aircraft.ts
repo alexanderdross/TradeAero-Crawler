@@ -737,6 +737,11 @@ export async function upsertAircraftListing(
       source_name: listing.sourceName,
       source_url: listing.sourceId,
       is_external: true,
+      // Audit flag that survives the claim flip. Set on every crawler INSERT
+      // so the admin claim-% stat denominator (count(was_external=true)) =
+      // "all listings that were ever external" — matching the intent of the
+      // column, not just "already-claimed" rows.
+      was_external: true,
       contact_name: listing.contactName ?? listing.sourceName,
       contact_email: listing.contactEmail ?? "noreply@trade.aero",
       contact_phone: listing.contactPhone ?? "",
@@ -791,11 +796,29 @@ export async function upsertAircraftListing(
       for (const [key, value] of Object.entries(record)) {
         if (/^(headline|description|slug)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
         if (key === "slug" || key === "images") continue;
+        // Never overwrite the claim audit flags on existing rows. `was_external`
+        // was set on the original INSERT; `claimed_at` / `claimed_from_source`
+        // are owner-controlled post-claim. The record scaffold only carries
+        // these values for INSERTs.
+        if (key === "was_external" || key === "claimed_at" || key === "claimed_from_source") continue;
         updateFields[key] = value;
       }
-      const { error } = await supabase.from("aircraft_listings")
-        .update({ ...updateFields, updated_at: new Date().toISOString() }).eq("id", existing.id);
+      // H2: atomic skip-on-claim guard. If the row was claimed between the
+      // dedup SELECT (above) and this UPDATE, the `.eq("is_external", true)`
+      // predicate makes the UPDATE a no-op instead of clobbering the
+      // claimed listing. We also keep the earlier SELECT-based skip for the
+      // common path (logs a clearer message, avoids a pointless UPDATE).
+      const { error, data: updatedRows } = await supabase.from("aircraft_listings")
+        .update({ ...updateFields, updated_at: new Date().toISOString() })
+        .eq("id", existing.id)
+        .eq("is_external", true)
+        .is("claimed_at", null)
+        .select("id");
       if (error) { logger.error(`Failed to update aircraft "${cleanTitle}": ${error.message}`); return "skipped"; }
+      if (!updatedRows || updatedRows.length === 0) {
+        logger.info(`Skipped claimed aircraft id=${existing.id} title="${cleanTitle}" (raced with claim flow)`);
+        return "skipped";
+      }
       logger.info(`Updated aircraft id=${existing.id} title="${cleanTitle}"`);
       return "updated";
     }

@@ -72,16 +72,31 @@ export async function upsertPartsListing(
       if (/^(headline|description|slug|remaining_life)_(en|de|fr|es|it|pl|cs|sv|nl|pt|ru|tr|el|no)$/.test(key)) continue;
       if (key === "slug") continue; // Preserve trigger-generated slug (headline-{listing_number})
       if (key === "images" && freshImages.length === 0) continue;
+      // Never overwrite the claim audit flags on existing rows.
+      if (key === "was_external" || key === "claimed_at" || key === "claimed_from_source") continue;
       updateFields[key] = value;
     }
 
-    const { error } = await supabase
+    // H2: atomic skip-on-claim guard. Redundant with the earlier dedup
+    // SELECT (which already returns "skipped" for claimed rows), but
+    // closes the race window between SELECT and UPDATE if a concurrent
+    // approval flips the row in the meantime.
+    const { error, data: updatedRows } = await supabase
       .from("parts_listings")
       .update({ ...updateFields, updated_at: new Date().toISOString() })
-      .eq("id", existing.id);
+      .eq("id", existing.id)
+      .eq("is_external", true)
+      .is("claimed_at", null)
+      .select("id");
 
     if (error) {
       logger.error("Failed to update parts listing", { sourceId: listing.sourceId, error: error.message });
+      return "skipped";
+    }
+    if (!updatedRows || updatedRows.length === 0) {
+      logger.info("Skipped claimed parts listing (raced with claim flow)", {
+        sourceId: listing.sourceId,
+      });
       return "skipped";
     }
     logger.debug("Updated parts listing", { sourceId: listing.sourceId });
@@ -200,6 +215,10 @@ function mapToPartsRow(
     source_name: listing.sourceName,
     source_url: listing.sourceId,
     is_external: true,
+    // Audit flag that survives the claim flip. Set on every crawler INSERT
+    // so the claim-% denominator counts every ever-external listing, not
+    // just already-claimed ones (mirrors src/db/aircraft.ts).
+    was_external: true,
 
     // Images — enriched with per-locale alt text
     images: enrichImagesWithLocalizedAlt(uploadedImages, listing.title, translations),

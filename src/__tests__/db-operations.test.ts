@@ -45,12 +45,30 @@ vi.mock("../db/reference-specs.js", () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build a mock for aircraft_listings table with configurable dedup + insert/update results */
+/** Build a mock for aircraft_listings table with configurable dedup + insert/update results.
+ *  The `existing` row carries is_external + claimed_at so skip-on-claim tests can
+ *  simulate claimed rows; the UPDATE chain terminates in `.select()` so the
+ *  atomic .eq("is_external", true).is("claimed_at", null) guard is testable. */
 function listingsMock(opts: {
-  existing?: { id: string } | null;
+  existing?:
+    | { id: string; is_external?: boolean; claimed_at?: string | null }
+    | null;
   insertResult?: { data: any; error: any };
   updateError?: any;
+  /** Simulate the atomic-guard no-op: UPDATE matched the WHERE but the
+   *  is_external/claimed_at predicate filtered it out. Returns empty data. */
+  updateFilteredOut?: boolean;
 }) {
+  const updateChain: any = {
+    eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    select: vi.fn().mockResolvedValue({
+      data: opts.updateFilteredOut
+        ? []
+        : [{ id: opts.existing?.id ?? "existing-id" }],
+      error: opts.updateError ?? null,
+    }),
+  };
   return {
     select: vi.fn().mockReturnValue({
       eq: vi.fn().mockReturnValue({
@@ -70,18 +88,19 @@ function listingsMock(opts: {
         ),
       }),
     }),
-    update: vi.fn().mockReturnValue({
-      eq: vi.fn().mockResolvedValue({ error: opts.updateError ?? null }),
-    }),
+    update: vi.fn().mockReturnValue(updateChain),
   };
 }
 
 function setupMockFrom(opts: {
   refSpecManufacturers?: string[];
   manufacturers?: { id: number; name: string }[];
-  existing?: { id: string } | null;
+  existing?:
+    | { id: string; is_external?: boolean; claimed_at?: string | null }
+    | null;
   insertResult?: { data: any; error: any };
   updateError?: any;
+  updateFilteredOut?: boolean;
   captureInsert?: (rec: any) => void;
 }) {
   mockFrom.mockImplementation((table: string) => {
@@ -110,6 +129,7 @@ function setupMockFrom(opts: {
         existing: opts.existing ?? null,
         insertResult: opts.insertResult,
         updateError: opts.updateError,
+        updateFilteredOut: opts.updateFilteredOut,
       });
       if (opts.captureInsert) {
         lm.insert = vi.fn().mockImplementation((rec: any) => {
@@ -158,12 +178,64 @@ beforeEach(() => {
 
 describe("dedup lookup", () => {
   it("updates existing listing instead of inserting", async () => {
-    setupMockFrom({ existing: { id: "existing-uuid-123" } });
+    setupMockFrom({
+      existing: { id: "existing-uuid-123", is_external: true, claimed_at: null },
+    });
 
     const { upsertAircraftListing } = await import("../db/aircraft.js");
     const result = await upsertAircraftListing(makeListing(), "system-user-id");
 
     expect(result).toBe("updated");
+  });
+});
+
+// Skip-on-claim guard (§8c of COLD_EMAIL_CLAIM_CONCEPT.md). Covers both
+// layers: the early-exit SELECT and the atomic UPDATE predicate.
+describe("skip-on-claim guard", () => {
+  it("skips when existing row has is_external=false (claimed)", async () => {
+    setupMockFrom({
+      existing: {
+        id: "claimed-uuid",
+        is_external: false,
+        claimed_at: "2026-04-20T10:00:00Z",
+      },
+    });
+
+    const { upsertAircraftListing } = await import("../db/aircraft.js");
+    const result = await upsertAircraftListing(makeListing(), "system-user-id");
+
+    expect(result).toBe("skipped");
+  });
+
+  it("skips when existing row has claimed_at set even if is_external is still true", async () => {
+    setupMockFrom({
+      existing: {
+        id: "claimed-uuid",
+        is_external: true,
+        claimed_at: "2026-04-20T10:00:00Z",
+      },
+    });
+
+    const { upsertAircraftListing } = await import("../db/aircraft.js");
+    const result = await upsertAircraftListing(makeListing(), "system-user-id");
+
+    expect(result).toBe("skipped");
+  });
+
+  it("returns skipped when the atomic UPDATE predicate filters the row (TOCTOU race)", async () => {
+    // The early SELECT saw is_external=true + claimed_at=null, so the guard
+    // lets us through. Between that SELECT and the UPDATE, an admin approval
+    // flipped the row. The UPDATE's .eq("is_external", true).is("claimed_at",
+    // null) predicate now matches zero rows — simulated by updateFilteredOut.
+    setupMockFrom({
+      existing: { id: "raced-uuid", is_external: true, claimed_at: null },
+      updateFilteredOut: true,
+    });
+
+    const { upsertAircraftListing } = await import("../db/aircraft.js");
+    const result = await upsertAircraftListing(makeListing(), "system-user-id");
+
+    expect(result).toBe("skipped");
   });
 });
 
