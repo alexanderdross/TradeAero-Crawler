@@ -5,6 +5,7 @@ import { uploadImages } from "../utils/images.js";
 import { translateListing, type TranslationResult } from "../utils/translate.js";
 import { generateSlug } from "../utils/slug.js";
 import { LANGS, buildLocaleFields } from "./locale-helpers.js";
+import { enqueueInviteCandidate } from "./invite-candidates.js";
 import type { ParsedPartsListing } from "../types.js";
 
 /**
@@ -144,6 +145,15 @@ export async function upsertPartsListing(
       await supabase.from("parts_listings").update(slugUpdate).eq("id", (inserted as { id: string }).id);
     }
   }
+
+  // Queue claim-invite candidate for parts sources with sendColdEmailInvite=true.
+  // Mirrors the aircraft.ts hook. Never blocks or fails the crawl.
+  await enqueueInviteCandidate({
+    listingId: (inserted as { id: string }).id,
+    listingType: "parts",
+    contactEmail: listing.contactEmail,
+    sourceName: listing.sourceName,
+  });
 
   logger.debug("Inserted parts listing", { sourceId: listing.sourceId, listingNumber: listingNum });
   return "inserted";

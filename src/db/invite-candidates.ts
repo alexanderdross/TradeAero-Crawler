@@ -15,18 +15,23 @@ function findSourceByName(sourceName: string): SourceConfig | null {
 /**
  * Queue a single claim-invite candidate row for a newly-inserted external
  * listing. Per-source `sendColdEmailInvite` flag gates whether we enqueue;
- * sources without the flag (Aircraft24, Aeromarkt in v1) silently no-op.
+ * sources without the flag (Aircraft24, Aeromarkt pending TOS audit)
+ * silently no-op.
+ *
+ * Covers both aircraft + parts listings (§3a of
+ * TradeAero-Refactor/docs/COLD_EMAIL_CLAIM_CONCEPT.md; requires Refactor
+ * migration 20260422_cold_email_expand_to_parts.sql).
  *
  * This is strictly an ENQUEUE — the actual email is sent by the Refactor
- * cron after a legal / kill-switch gate. See
- * TradeAero-Refactor/docs/COLD_EMAIL_CLAIM_CONCEPT.md §8.
+ * cron after a legal / kill-switch gate. See §8.
  */
 export async function enqueueInviteCandidate(params: {
   listingId: string;
+  listingType: "aircraft" | "parts";
   contactEmail: string | null | undefined;
   sourceName: string;
 }): Promise<void> {
-  const { listingId, contactEmail, sourceName } = params;
+  const { listingId, listingType, contactEmail, sourceName } = params;
   const source = findSourceByName(sourceName);
   if (!source?.sendColdEmailInvite) return;
 
@@ -41,31 +46,33 @@ export async function enqueueInviteCandidate(params: {
       .maybeSingle();
     if (suppressed) {
       logger.debug(
-        `[invite-candidate] skipping listing=${listingId} email=${email}: suppressed`,
+        `[invite-candidate] skipping listing=${listingId} type=${listingType} email=${email}: suppressed`,
       );
       return;
     }
 
-    // Unique index on listing_id + onConflict:ignore — safe to call on every
-    // insert; repeat calls for the same listing do nothing.
+    // Unique index on (listing_id, listing_type) + onConflict:ignore —
+    // safe to call on every insert; repeat calls for the same listing
+    // do nothing.
     const { error } = await supabase
       .from("invite_candidates")
       .upsert(
         {
           listing_id: listingId,
+          listing_type: listingType,
           contact_email: email,
           source_name: source.name,
         },
-        { onConflict: "listing_id", ignoreDuplicates: true },
+        { onConflict: "listing_id,listing_type", ignoreDuplicates: true },
       );
     if (error) {
       logger.warn(
-        `[invite-candidate] enqueue failed listing=${listingId}: ${error.message}`,
+        `[invite-candidate] enqueue failed listing=${listingId} type=${listingType}: ${error.message}`,
       );
       return;
     }
     logger.debug(
-      `[invite-candidate] queued listing=${listingId} source=${source.name}`,
+      `[invite-candidate] queued listing=${listingId} type=${listingType} source=${source.name}`,
     );
   } catch (err) {
     logger.warn(`[invite-candidate] unexpected error: ${err}`);
