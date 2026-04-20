@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { cleanText, generateSourceId } from "../utils/html.js";
 import { logger } from "../utils/logger.js";
+import { extractContact } from "./shared.js";
 import type { ParsedAircraftListing } from "../types.js";
 
 /**
@@ -131,6 +132,9 @@ function parseListingBlock(
 ): ParsedAircraftListing | null {
   const $ = cheerio.load(blockHtml);
   const text = cleanText($("body").text());
+  // Claim-invite flow needs contact_email populated — shared extractor
+  // handles mailto / [at] / deobfuscation in one place.
+  const contact = extractContact(blockHtml, text);
 
   if (text.length < 20) return null;
 
@@ -331,9 +335,13 @@ function parseListingBlock(
     city: city24,
     airfieldName: null,
     icaoCode: icaoCode24,
-    contactName: null,
-    contactEmail: null,
-    contactPhone: null,
+    // Shared extractor handles mailto:, [at]-obfuscated addresses, and
+    // the standard German "Tel./Telefon" phone patterns. Without this,
+    // downstream claim-invite cron skips aircraft24 listings because
+    // contact_email is null — see `/api/cron/send-invites/route.ts`.
+    contactName: contact.name,
+    contactEmail: contact.email,
+    contactPhone: contact.phone,
     imageUrls: images,
     registration,
     serialNumber,

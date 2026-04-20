@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { logger } from "../utils/logger.js";
+import { extractContact } from "./shared.js";
 import type { ParsedAircraftListing, ParsedPartsListing } from "../types.js";
 
 /** Build a description that passes the 10+ char DB constraint */
@@ -110,6 +111,9 @@ export function parseAeromarktAircraftPage(
       const locationCardMatch = cardText.match(/(?:Standort|Ort)[:\s]*([A-Za-zÄÖÜäöüß\s\-,]+)/i);
       const location = locationCardMatch ? locationCardMatch[1].trim().split(/[\n,]/)[0].trim() : null;
 
+      // Card-level contact is best-effort (detail page is authoritative).
+      const cardContact = extractContact($item.html() ?? "", cardText);
+
       // Extract city and ICAO from location string: "München (EDDM)", "Strausberg/EDAY"
       let cityCard: string | null = null;
       let icaoCard: string | null = null;
@@ -145,9 +149,14 @@ export function parseAeromarktAircraftPage(
         city: cityCard,
         airfieldName: null,
         icaoCode: icaoCard,
-        contactName: null,
-        contactEmail: null,
-        contactPhone: null,
+        // Best-effort card-level contact extraction. Most fields on
+        // aeromarkt's index view don't include seller contact info —
+        // those come from the detail page, filled later by
+        // parseAeromarktAircraftDetail(). But if the card does include
+        // a mailto/[at]-obfuscated address we pick it up here.
+        contactName: cardContact.name,
+        contactEmail: cardContact.email,
+        contactPhone: cardContact.phone,
         imageUrls: images,
         registration: null,
         serialNumber: null,
@@ -243,6 +252,12 @@ export function parseAeromarktPartsPage(
         }
       });
 
+      // Best-effort contact extraction on the parts card. Most aeromarkt
+      // parts cards lack seller contact info at index level; when it's
+      // absent we leave null so the claim-invite cron skips this listing
+      // rather than sending a blank email.
+      const partsContact = extractContact($item.html() ?? "", $item.text());
+
       listings.push({
         sourceId: detailUrl,
         sourceUrl: detailUrl,
@@ -256,9 +271,9 @@ export function parseAeromarktPartsPage(
         price,
         priceNegotiable: price === null,
         vatIncluded: null,
-        contactName: null,
-        contactEmail: null,
-        contactPhone: null,
+        contactName: partsContact.name,
+        contactEmail: partsContact.email,
+        contactPhone: partsContact.phone,
         imageUrls: images,
         location: null,
       });
@@ -643,6 +658,12 @@ export function parseAeromarktAircraftDetail(
   // otherwise keep index-page thumbnails (which are reliably scoped per-listing)
   const finalImages = detailImages.length > 0 ? detailImages : existing.imageUrls;
 
+  // Contact details live on the detail page — extract here so the
+  // cold-email claim-invite flow has contact_email / phone / name to
+  // work with. Shared helper handles mailto:, [at] obfuscation, and
+  // the standard German phone-label patterns.
+  const contact = extractContact(html, text);
+
   return {
     ...existing,
     sourceUrl: pageUrl,
@@ -670,6 +691,9 @@ export function parseAeromarktAircraftDetail(
     serviceCeiling: serviceCeiling ?? existing.serviceCeiling,
     climbRate: climbRate ?? existing.climbRate,
     fuelConsumption: fuelConsumption ?? existing.fuelConsumption,
+    contactName: contact.name ?? existing.contactName,
+    contactEmail: contact.email ?? existing.contactEmail,
+    contactPhone: contact.phone ?? existing.contactPhone,
     imageUrls: finalImages,
   };
 }
