@@ -971,6 +971,22 @@ export async function ensureManufacturer(name: string): Promise<number | null> {
 async function seedReferenceEntry(manufacturer: string, title: string): Promise<void> {
   try {
     const model = title.replace(new RegExp(manufacturer, "i"), "").trim().slice(0, 100) || "Unknown";
+
+    // Don't seed polluted models into aircraft_reference_specs. Without
+    // this guard, an engine string / German filler / headline dump
+    // extracted for `model` (see isCleanModel blacklist) would upsert
+    // a ghost ref-spec row — those surface on manufacturer hub pages as
+    // "Popular Models" cards with [0] listings and even become
+    // browseable model-hub URLs. Refactor-repo migration
+    // 20260421_purge_polluted_aircraft_reference_specs.sql cleans up
+    // existing damage; this check prevents further pollution.
+    if (!isCleanModel(model)) {
+      logger.debug(
+        `Skipped seedReferenceEntry — model looks polluted: "${model.slice(0, 60)}" (manufacturer=${manufacturer})`,
+      );
+      return;
+    }
+
     await (supabase as any).from("aircraft_reference_specs")
       .upsert({ manufacturer, model, variant: null, notes: `Auto-seeded: "${title.slice(0, 200)}"` },
         { onConflict: "manufacturer,model,variant", ignoreDuplicates: true });
