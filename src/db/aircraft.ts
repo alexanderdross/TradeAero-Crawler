@@ -136,7 +136,25 @@ function extractModelFromTitle(
   model = model.replace(/[\s,;:.!]+$/, "").trim();
 
   // Reject if result is garbage
-  if (!isCleanModel(model)) return title.slice(0, 60).trim();
+  if (!isCleanModel(model)) {
+    // Progressive shortening: try the first 3, 2, 1 words before giving up.
+    // Recovers clean names like "C42B", "CTSW", "WT9 Dynamic", "M8 Eagle",
+    // "A32", "MT 03" from headlines polluted with German marketing prose
+    // ("C42B Zum Verkauf aus privater…", "CTSW Wir verkaufen unsere
+    // zuverlässige Flight Design CTSW…", "WT9 Dynamic mit nagelneuem
+    // Motor 912 ULS…"). The full-title 60-char fallback this replaces
+    // routinely pushed sentence fragments into aircraft_listings.model.
+    const words = model.split(/\s+/).filter(Boolean);
+    for (let len = Math.min(3, words.length); len >= 1; len--) {
+      const candidate = words.slice(0, len).join(" ").trim();
+      if (isCleanModel(candidate)) return candidate;
+    }
+    // No usable prefix — leave the caller to decide. Empty string signals
+    // "unextractable"; the caller's ref-spec headline-scan fallback
+    // (extractModelFromTitle → scanHeadlineForKnownModel) should still
+    // recover a real model if one exists in aircraft_reference_specs.
+    return "";
+  }
 
   // Cap length
   return model.slice(0, 80);
@@ -718,7 +736,8 @@ export async function upsertAircraftListing(
     // polluted with spec dumps ("BRM Aero Bristell RG Bristell UL mit
     // Einziehfahrwerk, DynonAvionics SkyViewTouch Display").
     const modelLooksRaw = !(refSpecs as { ref_model?: string } | null)?.ref_model
-      && (modelName.length > 40 || modelName.split(/\s+/).length > 4 || !isCleanModel(modelName));
+      && (modelName.length === 0 || modelName.length > 40 ||
+          modelName.split(/\s+/).length > 4 || !isCleanModel(modelName));
     if (modelLooksRaw) {
       const scanned = await scanHeadlineForKnownModel(cleanTitle, manufacturerName);
       if (scanned && scanned.length <= 80) {
@@ -727,6 +746,21 @@ export async function upsertAircraftListing(
         );
         modelName = scanned;
       }
+    }
+
+    // Hard skip: if we STILL don't have a clean model after both the
+    // extract step AND the ref-spec headline scan, there's no way to
+    // produce a sensible manufacturer hub URL (/{type}/{manufacturer}/{model}/).
+    // Prior versions fell back to a 60-char title slice here, which
+    // pushed full headline sentences into aircraft_listings.model —
+    // produced unclickable hub URLs and garbage "model" cards in search.
+    // Better to skip the listing and let the admin seed the ref_spec or
+    // the next parser revision recover it.
+    if (!modelName || !isCleanModel(modelName)) {
+      logger.warn(
+        `Skipping listing "${cleanTitle.slice(0, 80)}" — no clean model could be extracted (manufacturer=${manufacturerName ?? "?"}, raw model="${modelName.slice(0, 40)}")`,
+      );
+      return "skipped";
     }
 
     const detectedCategoryName = await detectCategoryName(listing.sourceUrl, cleanTitle, manufacturerName, listing.registration);
