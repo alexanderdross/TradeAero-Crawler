@@ -369,7 +369,7 @@ function extractPrice(text: string): { amount: number | null; negotiable: boolea
     text.match(/([\d.]+)\s*(?:EUR|€)/i);
 
   if (priceMatch) {
-    let cleaned = priceMatch[1].replace(/\./g, "").replace(",", ".");
+    const cleaned = priceMatch[1].replace(/\./g, "").replace(",", ".");
     const amount = parseFloat(cleaned);
     return { amount: isNaN(amount) ? null : amount, negotiable: false };
   }

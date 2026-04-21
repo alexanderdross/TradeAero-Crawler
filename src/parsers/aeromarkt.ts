@@ -440,7 +440,7 @@ export function parseAeromarktAircraftDetail(
     const avItems: string[] = [];
     for (const section of avionicsSections) {
       // Items are separated by sentence boundaries or newline markers in the collapsed text
-      for (const item of section.split(/(?<=[a-zA-Z0-9])\s{2,}|[•·\-]\s*/)) {
+      for (const item of section.split(/(?<=[a-zA-Z0-9])\s{2,}|[•·-]\s*/)) {
         const s = item.trim();
         if (s.length > 3 && s.length < 300 && !seenItems.has(s.toLowerCase())) {
           seenItems.add(s.toLowerCase());

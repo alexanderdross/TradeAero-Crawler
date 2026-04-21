@@ -81,7 +81,7 @@ export function deduplicateDescription(text: string): string {
     }
   }
 
-  let result = unique.join("\n\n");
+  const result = unique.join("\n\n");
 
   // Also deduplicate repeated sentences within a single paragraph
   const sentences = result.split(/(?<=[.!?])\s+/);
