@@ -8,6 +8,17 @@ type Source = "helmut" | "aircraft24" | "aeromarkt";
 type Target = "aircraft" | "parts" | "all";
 
 async function main(): Promise<void> {
+  // Pre-prod kill switch. On the `production` GitHub Environment the
+  // variable is left unset, so the workflow exits cleanly without hitting
+  // the external sources or touching tradeaero-prod. dev/QA (main branch)
+  // sets it to "true" so the daily crawls keep populating tradeaero-dev.
+  if (process.env.CRAWLER_ENABLED !== "true") {
+    logger.info("CRAWLER_ENABLED is not 'true'; exiting without crawling.", {
+      branch: process.env.GITHUB_REF_NAME ?? "(unknown)",
+    });
+    return;
+  }
+
   validateConfig();
 
   const source = parseSource();

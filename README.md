@@ -1,6 +1,11 @@
 # TradeAero Crawler
 
-External aviation marketplace crawler for [TradeAero](https://refactor.trade.aero). Scrapes aircraft and parts listings from multiple German-language sources and ingests them into the TradeAero Supabase database with full multi-language support.
+External aviation marketplace crawler for TradeAero. Scrapes aircraft and parts listings from multiple German-language sources and ingests them into the TradeAero Supabase database with full multi-language support.
+
+Targets two environments via GitHub Environments on the workflow:
+
+- **Dev/QA** — `main` branch → `tradeaero-dev` Supabase project → backs https://refactor.trade.aero.
+- **Pre-prod / production** — `production` branch → `tradeaero-prod` Supabase project → backs https://trade.aero. Paused by default until public launch (`CRAWLER_ENABLED` left unset in the `production` GitHub Environment so the workflow exits cleanly without touching external sources).
 
 ## Sources
 

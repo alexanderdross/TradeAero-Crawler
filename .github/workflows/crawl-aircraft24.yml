@@ -40,6 +40,7 @@ jobs:
 
       - name: Run crawler
         env:
+          CRAWLER_ENABLED: ${{ vars.CRAWLER_ENABLED }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CRAWLER_SYSTEM_USER_ID: ${{ secrets.CRAWLER_SYSTEM_USER_ID }}
