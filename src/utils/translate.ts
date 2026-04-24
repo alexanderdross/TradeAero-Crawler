@@ -44,19 +44,25 @@ function getClient(): Anthropic {
 }
 
 /**
- * Translate headline and description into all 14 TradeAero locales using Claude Haiku 4.5.
- * Source language is auto-detected (typically German for crawled content).
+ * Translate headline and description from `sourceLang` into the 13 other
+ * TradeAero locales (default) OR a caller-specified subset via `options.targetLangs`.
  *
  * Bilingual content handling: The system prompt instructs Claude to detect and strip
  * duplicate translations (e.g. seller wrote in German then repeated in English).
  * Only the primary language content is translated, preventing mixed-language output.
  *
- * Returns null if translation fails (listing will be inserted with German only).
+ * Target-lang filtering is used by the `events` crawler (vereinsflieger) to
+ * enforce the bilingual-minimum policy: crawled events are stored in DE +
+ * EN only. Passing `options.targetLangs = ["en"]` with `sourceLang = "de"`
+ * yields `{ de: source, en: translation }` and nothing else.
+ *
+ * Returns null if translation fails.
  */
 export async function translateListing(
   headline: string,
   description: string,
-  sourceLang: Lang = "de"
+  sourceLang: Lang = "de",
+  options: { targetLangs?: readonly Lang[] } = {},
 ): Promise<TranslationResult | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -67,7 +73,10 @@ export async function translateListing(
   // Pre-clean: strip obvious bilingual separators and duplicate blocks
   const cleanedDescription = stripDuplicateLanguageBlocks(description);
 
-  const targetLangs = TARGET_LANGS.filter((l) => l !== sourceLang);
+  const requestedTargets = options.targetLangs
+    ? options.targetLangs.filter((l) => l !== sourceLang)
+    : TARGET_LANGS.filter((l) => l !== sourceLang);
+  const targetLangs = requestedTargets;
 
   try {
     const anthropic = getClient();
@@ -147,6 +156,7 @@ Return a JSON object with this exact structure:
     const result: Partial<TranslationResult> = {};
     result[sourceLang] = { headline, description: cleanedDescription };
     const missingLangs: string[] = [];
+    const isRestrictedRun = !!options.targetLangs;
     for (const lang of targetLangs) {
       if (translations[lang]?.headline && translations[lang]?.description) {
         // Sanitize translated text (strip any HTML tags from LLM output)
@@ -155,9 +165,14 @@ Return a JSON object with this exact structure:
           description: translations[lang].description.replace(/<[^>]*>/g, "").trim(),
         };
       } else {
-        // Fallback to source language text for missing locales
         missingLangs.push(lang);
-        result[lang] = { headline, description: cleanedDescription };
+        if (!isRestrictedRun) {
+          // Full-coverage (aircraft/parts): keep the historical fallback so
+          // every column is populated. The bilingual-minimum caller (events
+          // crawler) deliberately omits this path so unpopulated locale
+          // columns stay NULL instead of silently duplicating the source.
+          result[lang] = { headline, description: cleanedDescription };
+        }
       }
     }
 
