@@ -16,8 +16,13 @@ type Lang = (typeof LANGS)[number];
 type UpsertResult = "inserted" | "updated" | "skipped";
 
 /**
- * Build title_{lang}, description_{lang}, slug_{lang} fields for all 14
- * locales. Mirrors db/locale-helpers#buildLocaleFields but emits `title_*`
+ * Build title_{lang}, description_{lang}, slug_{lang} fields for the
+ * locales actually present in `translations`. Locales missing from the
+ * translator response are left unpopulated (the caller will pass them as
+ * NULL to Supabase) so bilingual-minimum runs don't silently fill all 14
+ * columns with the German source text.
+ *
+ * Mirrors db/locale-helpers#buildLocaleFields but emits `title_*`
  * instead of `headline_*` to match the aviation_events schema.
  */
 function buildEventLocaleFields(
@@ -30,17 +35,23 @@ function buildEventLocaleFields(
 
   for (const lang of LANGS) {
     const t = translations?.[lang as Lang];
-    const localizedTitle = t?.headline ?? title;
-    const localizedDesc = t?.description ?? description;
-    out[`title_${lang}`] = sanitizeForDb(localizedTitle);
-    out[`description_${lang}`] = sanitizeForDb(localizedDesc);
-    slugSource[lang] = { headline: localizedTitle };
+    if (!t?.headline || !t?.description) continue;
+    out[`title_${lang}`] = sanitizeForDb(t.headline);
+    out[`description_${lang}`] = sanitizeForDb(t.description);
+    slugSource[lang] = { headline: t.headline };
   }
 
   const slugs = generateLocalizedSlugs(slugSource);
-  for (const lang of LANGS) {
-    out[`slug_${lang}`] = slugs[lang] ?? "";
+  for (const lang of Object.keys(slugSource)) {
+    const s = slugs[lang];
+    if (s) out[`slug_${lang}`] = s;
   }
+
+  // Always set the bare `title`/`description` source mirror so the source
+  // language is recoverable even if no translation was produced.
+  if (!out.title_de && title) out.title_de = sanitizeForDb(title);
+  if (!out.description_de && description)
+    out.description_de = sanitizeForDb(description);
 
   return out;
 }
@@ -110,10 +121,18 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
     ? contentHash(existing.title ?? "", existing.description ?? "")
     : null;
 
-  // Skip translation work if the content is unchanged
+  // Skip translation work if the content is unchanged.
+  //
+  // Bilingual-minimum policy (per AVIATION_EVENTS_JOBS_CONCEPT.md): crawled
+  // events are stored in the source locale (`de` for vereinsflieger) plus
+  // English only. The other 12 locale columns stay NULL so downstream UI
+  // fallback (title_xx ?? title_en ?? title_de) shows users the translated
+  // English copy instead of silently duplicating German into every cell.
   let localeFields: Record<string, string> | null = null;
   if (!existing || existingHash !== newHash) {
-    const translations = await translateListing(title, description, "de");
+    const translations = await translateListing(title, description, "de", {
+      targetLangs: ["en"],
+    });
     localeFields = buildEventLocaleFields(title, description, translations);
   }
 
