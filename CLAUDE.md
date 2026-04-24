@@ -2,7 +2,10 @@
 
 ## Overview
 
-Standalone Node.js/TypeScript crawler that scrapes aircraft and parts listings from external aviation marketplaces and ingests them into the TradeAero Supabase database at https://refactor.trade.aero.
+Standalone Node.js/TypeScript crawler that scrapes aircraft and parts listings from external aviation marketplaces and ingests them into a TradeAero Supabase project. Two environments are supported, selected by branch via GitHub Environments:
+
+- `main` → `tradeaero-dev` (feeds https://refactor.trade.aero).
+- `production` → `tradeaero-prod` (feeds https://trade.aero). Paused by default until public launch (`CRAWLER_ENABLED` unset in the `production` GitHub Environment so the run exits cleanly without scraping).
 
 **Sources:**
 - **Helmut's UL Seiten** (helmuts-ul-seiten.de) -- German ultralight/microlight marketplace
