@@ -3,6 +3,18 @@
 > Companion source for `docs/AVIATION_EVENTS_JOBS_CONCEPT.md` (referenced from
 > `supabase/migrations/20260506_add_aviation_events.sql` in `tradeaero-refactor`).
 
+> **Status (2026-04-24):** Crawler **shipped**. `src/crawlers/vereinsflieger-crawler.ts`
+> + `src/parsers/vereinsflieger.ts` + `src/db/events.ts` are live on the main
+> branch; the daily cron (`.github/workflows/crawl-vereinsflieger.yml`, 09:00
+> UTC) and admin on-demand trigger (via the refactor repo's crawler tab) both
+> run against `tradeaero-dev` on `CRAWLER_ENABLED=true`. SQL migrations —
+> `20260424_vereinsflieger_event_support.sql`,
+> `20260506_add_aviation_events.sql`,
+> `20260510_add_aviation_events_moderation.sql`, and
+> `20260511_aviation_events_crawler_dedup.sql` — are applied in
+> `tradeaero-refactor`. Crawled rows land with
+> `moderation_status='approved'` so they appear on `/events` immediately.
+
 ---
 
 ## 1. Context
@@ -14,16 +26,17 @@ the largest public aviation-event calendar in the German-speaking world
 fairs, general events) and exposes it without authentication at
 `https://vereinsflieger.de/publiccalendar/?category={1..6}`.
 
-A new crawler `vereinsflieger` will:
-- pull every upcoming event across the six source categories,
-- map them onto the existing `event_categories` lookup,
-- upsert into `aviation_events` using the same translation / slug / RLS
+The `vereinsflieger` crawler:
+- pulls every upcoming event across the six source categories,
+- maps them onto the existing `event_categories` lookup,
+- upserts into `aviation_events` using the same translation / slug / RLS
   pipeline that `aircraft_listings` uses,
-- be triggerable from the **Crawler tab** in the admin dashboard exactly like
-  the three existing crawlers.
+- is triggerable from the **Crawler tab** in the admin dashboard exactly
+  like the three existing crawlers (Helmut, Aircraft24, Aeromarkt).
 
-This unlocks the events page in production without any frontend work beyond
-registering the new source on the admin tab.
+This fills the events page in production with ~400–600 DACH events at day
+one and is the upstream feed for the user-facing surface described in
+§9 below.
 
 ---
 
@@ -238,18 +251,27 @@ admin operational expectations consistent and the run is cheap (6 requests).
 
 ## 6. Admin dashboard wiring (`tradeaero-refactor`)
 
-Branch: `claude/event-crawler-vereinsflieger-6wDfy`.
+Branch: `claude/add-event-crawler-1f6mh`.
 
-Three small edits — no new components.
+Three small edits — no new components — all shipped on
+`claude/add-event-crawler-1f6mh`:
 
-| File | Change |
-|---|---|
-| `src/components/dashboard/admin/AdminCrawlerTab.tsx` | Append `{ key: "vereinsflieger", label: "Vereinsflieger" }` to the hardcoded button array. Add `if (name.includes("vereinsflieger")) return "text-amber-600";` to `getSourceColor()`. |
-| `src/app/api/admin/trigger-crawl/route.ts` | Add `vereinsflieger: "crawl-vereinsflieger.yml"` to `WORKFLOW_MAP`, and append `"vereinsflieger"` to the `source === "all"` fan-out. |
+| File | Change | Status |
+|---|---|---|
+| `src/components/dashboard/admin/AdminCrawlerTab.tsx` | Appended `{ key: "vereinsflieger", label: "Vereinsflieger" }` to the hardcoded button array. Added `if (name.includes("vereinsflieger")) return "text-amber-600";` to `getSourceColor()`. Added `"events"` as a target filter option so run history can be filtered to event-only runs. | ✅ shipped |
+| `src/app/api/admin/trigger-crawl/route.ts` | Added `vereinsflieger: "crawl-vereinsflieger.yml"` to `WORKFLOW_MAP`, and appended `"vereinsflieger"` to the `source === "all"` fan-out. | ✅ shipped |
 
-The crawler tab already auto-populates source filter / health card / run
-history rows from `crawler_runs`, so a row named `vereinsflieger.de` will
-appear with no further frontend work as soon as the first run completes.
+The crawler tab auto-populates source filter / health card / run history
+rows from `crawler_runs`, so the `vereinsflieger.de` row appears alongside
+Helmut/Aircraft24/Aeromarkt as soon as the first run completes. Admin flow:
+
+1. Navigate to `/dashboard/admin/` → **Crawler** tab.
+2. Click the **Vereinsflieger** button (or **Crawl All** to fan out to all
+   four crawlers).
+3. The POST to `/api/admin/trigger-crawl` dispatches
+   `crawl-vereinsflieger.yml` via `repository_dispatch`; results appear in
+   the run-history table as a `target=events` row within ~60s of
+   completion.
 
 ---
 
@@ -292,6 +314,67 @@ End-to-end:
   enrichment job).
 - Following organizer `redirectto` tokens to scrape per-organizer detail
   pages (fragile, per-Verein parsing, large request fan-out).
-- ICS export endpoint for events (frontend concern).
 - Past-event archival — vereinsflieger only exposes upcoming events; we
   rely on `expires_at` housekeeping already provided by the events table.
+
+---
+
+## 9. End-user surface (`tradeaero-refactor`, cross-referenced here)
+
+The crawler is one of four input paths into `aviation_events`. All four
+share the same read surface and lifecycle; the only difference is the
+`moderation_status` they land with.
+
+| Input | Who | Lands with | Visible on `/events` |
+|---|---|---|---|
+| Vereinsflieger crawler (this doc) | `crawler@trade.aero` system user, `external_source='vereinsflieger.de'` | `moderation_status='approved'` | Immediately after the run completes |
+| Admin-authored event | Admin via `EventForm` | `moderation_status='approved'` | Immediately |
+| User-submitted event via `/events/submit/` | Signed-in user (AuthModal-gated in `EventForm`) | `moderation_status='pending'` | **Only after** an admin approves in `AdminEventsTab` |
+| Other future crawlers | Respective system users | `moderation_status='approved'` | Immediately |
+
+### 9.1 Browse & bookmarks
+
+- `/events` — public list + filter surface (date-range, category, country,
+  list ↔ calendar toggle). RLS policy
+  `aviation_events_select_active_public` already enforces
+  `status='active' AND moderation_status='approved'`, so pending /
+  rejected rows never leak to anonymous readers.
+- `/events/[slug]` — detail page with Schema.org `Event` JSON-LD,
+  per-event `.ics` download at `/events/[slug]/ics`, bookmark button.
+- **Bookmarks** — the polymorphic `bookmarks` table (migration
+  `20260509_add_bookmarks_polymorphic.sql`) already supports
+  `target_type='event'` with an `event_id` FK to `aviation_events.id`.
+  `/bookmarks` renders an **Events** tab alongside Aircraft / Parts /
+  Rentals via the existing nested join
+  `aviation_events(slug)`. No crawler-side work needed — bookmarking
+  works for any row regardless of origin.
+
+### 9.2 User submissions + admin approval
+
+- `/events/submit/` — public URL, anonymous visitors can draft in the
+  `EventForm` (state persisted to `localStorage` via
+  `useEventFormStore`), but the submit button opens `AuthModal` so an
+  account is required to publish. On success the row is written with
+  `user_id = auth.uid()`, `status='active'`, and
+  `moderation_status='pending'`.
+- `AdminEventsTab` (admin dashboard → **Events** tab) is the moderation
+  queue: sub-tabs **Pending / Approved / Rejected**, approve+reject
+  actions, optional admin notes. Approve flips `moderation_status` to
+  `'approved'`, stamps `moderated_at + moderated_by`, kicks off the
+  existing publish pipeline (auto-translate → enqueue indexing →
+  CacheWarmer), and writes an `admin_activity_logs` row. Reject keeps
+  the row as an audit trail but hides it via RLS.
+- The moderation queue reuses the same `EventForm` for admin-authored
+  events (bypass the queue — admins land direct as `approved`) and for
+  edits to already-approved events (translation re-runs only if title
+  or description change).
+
+### 9.3 Why the crawler bypasses moderation
+
+Crawled rows originate from the public vereinsflieger calendar — a
+curated surface that already performs its own club-level moderation —
+and are authored by the `crawler@trade.aero` system user. Forcing them
+through `pending` would stall the admin queue (daily ~400–600 rows) and
+duplicate work. If spam or low-quality content ever appears, the
+per-source allowlist in `src/config.ts` is the right lever, not
+per-row review.
