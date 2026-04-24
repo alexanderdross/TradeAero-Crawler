@@ -124,11 +124,56 @@ export interface ParsedPartsListing {
   location: string | null;
 }
 
+/**
+ * Parsed aviation event — one row per public-calendar entry on
+ * vereinsflieger.de. Mirrors the conventions of ParsedAircraftListing:
+ * intermediate shape before mapping to the aviation_events schema.
+ */
+export interface ParsedEvent {
+  /** Stable dedup key: `${pageUrl}#${sha1(title|startISO|organizer)}` */
+  sourceId: string;
+  /** Same as sourceId — persisted to aviation_events.source_url */
+  sourceUrl: string;
+  /** Source website name, e.g. "vereinsflieger.de" */
+  sourceName: string;
+  /** Source page URL (used as referer context) */
+  pageUrl: string;
+  /** Vereinsflieger source category 1..6 (for audit/debug only) */
+  sourceCategoryId: number;
+  /** Mapped event_categories.code (seminar, competition, ...) */
+  categoryCode: string;
+
+  /** Event title, raw German */
+  title: string;
+  /** Sub-/type line (e.g. "Seminar - Fortbildung") */
+  subtitle: string | null;
+  /** Source "24.04.2026" / "24.04.2026 - 26.04.2026" string, preserved for description */
+  dateRangeText: string | null;
+
+  /** Start/end in ISO 8601 (UTC). Both are midnight of the calendar day. */
+  startDate: string;
+  endDate: string;
+  /** IANA timezone — always 'Europe/Berlin' for this source */
+  timezone: string;
+
+  /** ISO 3166-1 alpha-2 country code — always 'DE' for this source */
+  country: string;
+  /** Best-effort city extraction from venue text */
+  city: string | null;
+  /** Venue name with trailing `(EDXX)` stripped */
+  venueName: string;
+  /** Extracted from venue text via `/\(([A-Z]{4})\)/`; nullable */
+  icaoCode: string | null;
+
+  /** Organiser club / Verband name */
+  organizerName: string;
+}
+
 /** Result of a single crawl run */
 export interface CrawlResult {
   runId: string;
   source: string;
-  target: "aircraft" | "parts";
+  target: "aircraft" | "parts" | "events";
   startedAt: string;
   completedAt: string;
   pagesProcessed: number;

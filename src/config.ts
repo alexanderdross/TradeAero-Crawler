@@ -5,6 +5,11 @@ export interface SourceConfig {
   baseUrl: string;
   aircraft: string[];
   parts: string[];
+  /**
+   * Public-calendar event URLs. Used by the vereinsflieger crawler; other
+   * sources leave this undefined.
+   */
+  events?: string[];
   /** Use Bright Data proxy for this source (default: false) */
   useProxy?: boolean;
   /**
@@ -73,6 +78,22 @@ export const config = {
         "https://www.aeromarkt.net/Avionik-Instrumente/",
       ],
       useProxy: true,
+    },
+    vereinsflieger: {
+      name: "vereinsflieger.de",
+      baseUrl: "https://vereinsflieger.de",
+      aircraft: [],
+      parts: [],
+      events: [
+        "https://vereinsflieger.de/publiccalendar/?category=1",
+        "https://vereinsflieger.de/publiccalendar/?category=2",
+        "https://vereinsflieger.de/publiccalendar/?category=3",
+        "https://vereinsflieger.de/publiccalendar/?category=4",
+        "https://vereinsflieger.de/publiccalendar/?category=5",
+        "https://vereinsflieger.de/publiccalendar/?category=6",
+      ],
+      useProxy: false,
+      sendColdEmailInvite: false,
     },
   } satisfies Record<string, SourceConfig>,
   /** Default country for German sources */
