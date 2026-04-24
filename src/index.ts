@@ -2,10 +2,11 @@ import { validateConfig } from "./config.js";
 import { crawlHelmut } from "./crawlers/helmut-crawler.js";
 import { crawlAircraft24 } from "./crawlers/aircraft24-crawler.js";
 import { crawlAeromarkt } from "./crawlers/aeromarkt-crawler.js";
+import { crawlVereinsflieger } from "./crawlers/vereinsflieger-crawler.js";
 import { logger } from "./utils/logger.js";
 
-type Source = "helmut" | "aircraft24" | "aeromarkt";
-type Target = "aircraft" | "parts" | "all";
+type Source = "helmut" | "aircraft24" | "aeromarkt" | "vereinsflieger";
+type Target = "aircraft" | "parts" | "events" | "all";
 
 async function main(): Promise<void> {
   // Pre-prod kill switch. On the `production` GitHub Environment the
@@ -29,13 +30,16 @@ async function main(): Promise<void> {
 
   switch (source) {
     case "helmut":
-      results.push(...(await crawlHelmut(target)));
+      results.push(...(await crawlHelmut(target === "events" ? "all" : target)));
       break;
     case "aircraft24":
-      results.push(...(await crawlAircraft24(target)));
+      results.push(...(await crawlAircraft24(target === "events" ? "all" : target)));
       break;
     case "aeromarkt":
-      results.push(...(await crawlAeromarkt(target)));
+      results.push(...(await crawlAeromarkt(target === "events" ? "all" : target)));
+      break;
+    case "vereinsflieger":
+      results.push(...(await crawlVereinsflieger(target)));
       break;
   }
 
@@ -67,7 +71,7 @@ async function main(): Promise<void> {
 }
 
 function parseSource(): Source {
-  const validSources: Source[] = ["helmut", "aircraft24", "aeromarkt"];
+  const validSources: Source[] = ["helmut", "aircraft24", "aeromarkt", "vereinsflieger"];
   const arg = process.argv.find((a) => a.startsWith("--source"));
   if (!arg) return "helmut";
 
@@ -83,7 +87,7 @@ function parseSource(): Source {
 }
 
 function parseTarget(): Target {
-  const validTargets: Target[] = ["all", "aircraft", "parts"];
+  const validTargets: Target[] = ["all", "aircraft", "parts", "events"];
   const arg = process.argv.find((a) => a.startsWith("--target"));
   if (!arg) return "all";
 
