@@ -5,6 +5,7 @@ import { translateListing } from "../utils/translate.js";
 import { generateLocalizedSlugs } from "../utils/slug.js";
 import { sanitizeForDb } from "../utils/html.js";
 import { logger } from "../utils/logger.js";
+import { geocode } from "../utils/geocode.js";
 import type { ParsedEvent } from "../types.js";
 import { synthesizeEventDescription } from "../parsers/vereinsflieger.js";
 
@@ -29,6 +30,7 @@ function buildEventLocaleFields(
   title: string,
   description: string,
   translations: Awaited<ReturnType<typeof translateListing>>,
+  sourceLocale: string = "de",
 ): Record<string, string> {
   const out: Record<string, string> = {};
   const slugSource: Record<string, { headline: string }> = {};
@@ -47,11 +49,14 @@ function buildEventLocaleFields(
     if (s) out[`slug_${lang}`] = s;
   }
 
-  // Always set the bare `title`/`description` source mirror so the source
-  // language is recoverable even if no translation was produced.
-  if (!out.title_de && title) out.title_de = sanitizeForDb(title);
-  if (!out.description_de && description)
-    out.description_de = sanitizeForDb(description);
+  // Always set the source-locale columns so the row is recoverable even
+  // if the translator returned no usable response (missing ANTHROPIC_API_KEY,
+  // rate limit, transient error, etc).
+  const srcKey = `title_${sourceLocale}`;
+  const srcDescKey = `description_${sourceLocale}`;
+  if (!out[srcKey] && title) out[srcKey] = sanitizeForDb(title);
+  if (!out[srcDescKey] && description)
+    out[srcDescKey] = sanitizeForDb(description);
 
   return out;
 }
@@ -67,8 +72,17 @@ function contentHash(title: string, description: string): string {
  * translations unless the hash of (title + description) has changed.
  */
 export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
-  const description = synthesizeEventDescription(event);
+  // Use the parser-supplied description when present (ICS feeds carry one);
+  // otherwise synthesize from the available metadata (Vereinsflieger).
+  const description =
+    event.description && event.description.trim().length >= 10
+      ? event.description
+      : synthesizeEventDescription(event);
   const title = event.title;
+  // Source language drives the bilingual-min translator. Defaults to "de"
+  // for legacy compatibility with the Vereinsflieger crawler — every newer
+  // crawler should set sourceLocale explicitly on the ParsedEvent.
+  const sourceLocale = event.sourceLocale ?? "de";
 
   // Look up existing row to decide insert vs update, and to reuse translations
   const { data: existing, error: selectError } = await supabase
@@ -86,6 +100,25 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
   }
 
   const categoryId = await getEventCategoryIdByCode(event.categoryCode);
+
+  // Geocode missing coords. Only runs on INSERT (no `existing` row yet) and
+  // when the parser didn't already populate lat/lng — Nominatim is rate-
+  // limited (1 req/s) so we minimise calls. Failures are non-fatal: the
+  // row inserts without coords and the map view falls back to ICAO/city.
+  let latitude = event.latitude ?? null;
+  let longitude = event.longitude ?? null;
+  if (!existing && (latitude == null || longitude == null)) {
+    const hit = await geocode({
+      venue: event.venueName,
+      city: event.city,
+      country: event.country,
+      icao: event.icaoCode,
+    });
+    if (hit) {
+      latitude = hit.lat;
+      longitude = hit.lon;
+    }
+  }
 
   // Compose the base payload (static columns shared by insert + update)
   const baseSlug = slugify(title);
@@ -105,6 +138,8 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
     city: event.city ?? event.venueName,
     venue_name: event.venueName,
     icao_code: event.icaoCode,
+    latitude,
+    longitude,
     organizer_name: event.organizerName,
     price: 0,
     currency: "EUR",
@@ -130,10 +165,22 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
   // English copy instead of silently duplicating German into every cell.
   let localeFields: Record<string, string> | null = null;
   if (!existing || existingHash !== newHash) {
-    const translations = await translateListing(title, description, "de", {
-      targetLangs: ["en"],
-    });
-    localeFields = buildEventLocaleFields(title, description, translations);
+    // Bilingual-min targets: just English when source isn't already
+    // English; an empty target list otherwise (translator returns the
+    // source as-is for the en-source case).
+    const targetLangs = sourceLocale === "en" ? [] : (["en"] as const);
+    const translations = await translateListing(
+      title,
+      description,
+      sourceLocale as "en" | "de" | "fr" | "es" | "it" | "pl" | "cs" | "sv" | "nl" | "pt" | "ru" | "tr" | "el" | "no",
+      { targetLangs: targetLangs as readonly Lang[] },
+    );
+    localeFields = buildEventLocaleFields(
+      title,
+      description,
+      translations,
+      sourceLocale,
+    );
   }
 
   if (existing) {

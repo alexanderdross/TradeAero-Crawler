@@ -1,0 +1,60 @@
+name: "Crawl ICS feeds"
+
+# Generic iCalendar / ICS feed crawler. Pulls every entry in
+# `config.sources.ics.calendars[]` and upserts via the same events
+# pipeline Vereinsflieger uses. Empty calendar list = no-op (nothing to
+# fetch), so the workflow is safe to enable before the list is curated.
+
+on:
+  schedule:
+    # Weekly on Sunday at 10:00 UTC — one hour after the Vereinsflieger
+    # crawler so the events tab gets one consolidated weekly refresh
+    # rather than two separate stripes in the run-history.
+    - cron: "0 10 * * 0"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Crawl target (only 'events' is meaningful for this source)"
+        required: false
+        default: "events"
+        type: choice
+        options:
+          - events
+          - all
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run crawler
+        env:
+          CRAWLER_ENABLED: ${{ vars.CRAWLER_ENABLED }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CRAWLER_SYSTEM_USER_ID: ${{ secrets.CRAWLER_SYSTEM_USER_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Lets you turn off Nominatim lookups during prod incidents
+          # without redeploying. Set to "true" in repo Variables to skip.
+          GEOCODE_DISABLED: ${{ vars.GEOCODE_DISABLED }}
+          CRAWL_DELAY_MS: "2000"
+        run: node dist/index.js --source ics --target "${{ github.event.inputs.target || 'events' }}"
