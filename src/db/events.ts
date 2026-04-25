@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { contentHash, slugify } from "./event-dedup.js";
 import { supabase } from "./client.js";
 import { getEventCategoryIdByCode } from "./categories.js";
 import { translateListing } from "../utils/translate.js";
@@ -61,10 +61,11 @@ function buildEventLocaleFields(
   return out;
 }
 
-/** Stable hash of the translatable content — drives re-translate decisions. */
-function contentHash(title: string, description: string): string {
-  return createHash("sha1").update(`${title} ${description}`).digest("hex");
-}
+// `contentHash` + `slugify` live in `./event-dedup.ts` so the dedup
+// helpers are unit-testable without triggering this module's Supabase
+// client initialisation. Re-exported here for any downstream consumer
+// that already imports them from `./events`.
+export { contentHash, slugify };
 
 /**
  * Upsert a single event row. Dedup is enforced by the partial UNIQUE index
@@ -222,19 +223,3 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
   return "inserted";
 }
 
-/**
- * Base slug for the `slug` column — the schema requires UNIQUE NOT NULL so
- * we append the sha1 fragment already embedded in source_url to guarantee
- * uniqueness without an extra DB round-trip.
- */
-function slugify(title: string): string {
-  const base = title
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-  const suffix = createHash("sha1").update(title).digest("hex").slice(0, 8);
-  return `${base || "event"}-${suffix}`;
-}
