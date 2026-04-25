@@ -2,6 +2,7 @@ import { contentHash, slugify } from "./event-dedup.js";
 import { supabase } from "./client.js";
 import { verifyEventsDedupIndex } from "./events-startup-checks.js";
 import { getEventCategoryIdByCode } from "./categories.js";
+import { validateEvent } from "./event-validation.js";
 import { translateListing } from "../utils/translate.js";
 import { generateLocalizedSlugs } from "../utils/slug.js";
 import { sanitizeForDb } from "../utils/html.js";
@@ -107,6 +108,21 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
   // First call per process: surface a clear warning if the dedup
   // index migration hasn't run. Memoised inside the helper.
   await verifyEventsDedupIndex();
+
+  // Sanity-validate the parsed row before doing anything expensive
+  // (translator + geocoder both have non-trivial cost). Failures are
+  // logged with a stable reason tag so the dropped-rate metric in the
+  // admin dashboard can chart them by cause.
+  const validation = validateEvent(event);
+  if (!validation.ok) {
+    logger.warn("Dropping invalid event", {
+      sourceName: event.sourceName,
+      sourceUrl: event.sourceUrl,
+      title: event.title,
+      reason: validation.reason,
+    });
+    return "skipped";
+  }
 
   // Use the parser-supplied description when present (ICS feeds carry one);
   // otherwise synthesize from the available metadata (Vereinsflieger).
