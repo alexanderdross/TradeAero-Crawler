@@ -105,11 +105,28 @@ For an HTML source — the "1-day clone" path:
 
 For an ICS source:
 
+0. **Discover the candidate feed URL.** Run:
+
+   ```bash
+   npm run seed:ics-calendars                  # all 11 Tier-1 orgs
+   npm run seed:ics-calendars -- --url=<url>   # a single one-off org
+   npm run seed:ics-calendars -- --json        # machine-readable
+   ```
+
+   The script visits each canonical events / calendar page and
+   prints any `.ics`, `.ical`, `webcal://`, or
+   `<link rel="alternate" type="text/calendar">` reference it
+   finds, formatted as a ready-to-paste `IcsCalendar` entry. Orgs
+   with no exposed feed are listed under a "needs bespoke HTML
+   crawler" section so you know to escalate to the HTML path.
 1. Confirm the feed URL is stable (no per-session token) and
    public-facing (linked from a "Calendar" page).
 2. Check the host's `robots.txt` doesn't disallow the `.ics` path.
-3. Append a `{ name, url, country, defaultCategory, sourceLocale,
-   organiserName, timezone }` object to `config.sources.ics.calendars[]`.
+3. Append the printed `{ name, url, country, defaultCategory,
+   sourceLocale, organiserName, timezone }` object to
+   `config.sources.ics.calendars[]`. Edit `country` /
+   `defaultCategory` / `sourceLocale` if the seed-script defaults
+   need refining.
 4. The next scheduled `crawl-ics.yml` run will ingest it. No code
    changes needed.
 
