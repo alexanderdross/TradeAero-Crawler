@@ -56,6 +56,74 @@ export interface IcsEvent {
    *  Captured for the bounded expander in `expandRrule()`; null when
    *  the event isn't recurring. */
   rrule: string | null;
+  /** True when DTSTART is `VALUE=DATE` (date-only, no time-of-day).
+   *  Lets the dedup key collapse all-day↔timed format flips so a feed
+   *  that re-issues the same event in either form doesn't double-write. */
+  isAllDay: boolean;
+  /** ISO 8601 UTC strings of dates excluded from the recurrence (RFC
+   *  5545 §3.8.5.1 EXDATE). The expander drops occurrences whose start
+   *  matches any entry. Empty for non-recurring events. */
+  exdates: string[];
+  /** ISO 8601 UTC strings of additional occurrences appended to the
+   *  recurrence (RFC 5545 §3.8.5.2 RDATE). Useful for one-off
+   *  cancelled-then-rescheduled meetings or feed exporters that don't
+   *  emit a clean RRULE. */
+  rdates: string[];
+  /** `STATUS:` value (CONFIRMED / CANCELLED / TENTATIVE). null when
+   *  absent. The parser drops `CANCELLED` rows in `parseIcsCalendar`. */
+  status: "CONFIRMED" | "CANCELLED" | "TENTATIVE" | null;
+}
+
+/**
+ * Parse an RFC 5545 §3.8.2.5 DURATION value into milliseconds.
+ *
+ * Accepted forms (subset that real feeds emit):
+ *   - `P1W`        — 1 week
+ *   - `P1D`        — 1 day
+ *   - `PT1H`       — 1 hour
+ *   - `PT30M`      — 30 minutes
+ *   - `PT15M`      — 15 minutes
+ *   - `P1DT12H`    — 1 day 12 hours
+ *   - `PT1H30M`    — composite time-only
+ *   - `-PT15M`     — negative duration (rare, allowed in TRIGGER)
+ *
+ * Returns null on unparseable input. Used as a DTEND fallback when a
+ * VEVENT carries DURATION instead of an explicit DTEND (Google
+ * exports do this for all-day single events).
+ */
+export function parseIcsDuration(value: string): number | null {
+  const m = value
+    .trim()
+    .match(
+      /^([+-]?)P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/,
+    );
+  if (!m) return null;
+  const [, sign, w, d, h, mi, s] = m;
+  if (!w && !d && !h && !mi && !s) return null;
+  const seconds =
+    Number(w ?? 0) * 7 * 24 * 60 * 60 +
+    Number(d ?? 0) * 24 * 60 * 60 +
+    Number(h ?? 0) * 60 * 60 +
+    Number(mi ?? 0) * 60 +
+    Number(s ?? 0);
+  const ms = seconds * 1000;
+  return sign === "-" ? -ms : ms;
+}
+
+/**
+ * Rewrite `webcal://` and `webcals://` URL schemes to `https://`.
+ *
+ * `webcal://` is a calendar-subscription URL hint introduced by Apple
+ * iCal (and adopted by Google / Microsoft); the actual transport is
+ * plain HTTPS. Many event-page anchors use it so users get an
+ * "Add to calendar" prompt. Our crawler fetches the same payload over
+ * HTTPS — normalising at the edge means a config entry can copy-paste
+ * the user-facing URL verbatim.
+ *
+ * Non-webcal URLs are returned unchanged.
+ */
+export function normalizeIcsUrl(url: string): string {
+  return url.replace(/^webcals?:\/\//i, "https://");
 }
 
 /**
@@ -210,7 +278,12 @@ function zonedTimeToUtc(isoLocal: string, tz: string): number | null {
 export function parseIcs(input: string): IcsEvent[] {
   const lines = unfold(input).split("\n");
   const events: IcsEvent[] = [];
-  let current: Partial<IcsEvent> & { _dtstartTz?: string | null } | null = null;
+  let current:
+    | (Partial<IcsEvent> & {
+        _dtstartTz?: string | null;
+        _durationMs?: number | null;
+      })
+    | null = null;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
@@ -223,17 +296,30 @@ export function parseIcs(input: string): IcsEvent[] {
     }
     if (prop.name === "END" && prop.value.toUpperCase() === "VEVENT") {
       if (current && current.uid && current.summary && current.startIso) {
+        // Resolve endIso: prefer explicit DTEND, fall back to
+        // DTSTART + DURATION, fall back to DTSTART (single-instant).
+        let endIso = current.endIso;
+        if (!endIso && current._durationMs != null) {
+          const startMs = new Date(current.startIso).getTime();
+          if (Number.isFinite(startMs)) {
+            endIso = new Date(startMs + current._durationMs).toISOString();
+          }
+        }
         events.push({
           uid: current.uid,
           summary: current.summary,
           description: current.description ?? "",
           startIso: current.startIso,
-          endIso: current.endIso ?? current.startIso,
+          endIso: endIso ?? current.startIso,
           tzid: current._dtstartTz ?? null,
           location: current.location ?? "",
           url: current.url ?? null,
           categories: current.categories ?? [],
           rrule: current.rrule ?? null,
+          isAllDay: current.isAllDay ?? false,
+          exdates: current.exdates ?? [],
+          rdates: current.rdates ?? [],
+          status: current.status ?? null,
         });
       }
       current = null;
@@ -269,6 +355,12 @@ export function parseIcs(input: string): IcsEvent[] {
         if (iso) {
           current.startIso = iso;
           current._dtstartTz = tzid;
+          // VALUE=DATE → all-day event (date-only DTSTART). The regex
+          // fallback covers feeds that omit the parameter but emit a
+          // bare YYYYMMDD value (Google export does this).
+          current.isAllDay =
+            prop.params.VALUE?.toUpperCase() === "DATE" ||
+            /^\d{8}$/.test(prop.value.trim());
         }
         break;
       }
@@ -278,9 +370,48 @@ export function parseIcs(input: string): IcsEvent[] {
         if (iso) current.endIso = iso;
         break;
       }
+      case "DURATION": {
+        // Alternative to DTEND. Resolved against startIso below in a
+        // post-pass — DURATION may appear before DTSTART in some
+        // exports, so we stash the raw value and apply it once the
+        // VEVENT closes.
+        current._durationMs = parseIcsDuration(prop.value);
+        break;
+      }
       case "RRULE":
         current.rrule = prop.value;
         break;
+      case "EXDATE": {
+        // EXDATE may carry one or more comma-separated values, each
+        // with the same DATE / DATE-TIME formats DTSTART accepts.
+        const tzid = prop.params.TZID ?? null;
+        const list = current.exdates ?? [];
+        for (const part of prop.value.split(",")) {
+          const iso = parseIcsDate(part, tzid);
+          if (iso) list.push(iso);
+        }
+        current.exdates = list;
+        break;
+      }
+      case "RDATE": {
+        // Mirrors EXDATE: explicit additional occurrences. Less common
+        // than EXDATE but RFC 5545 supports both.
+        const tzid = prop.params.TZID ?? null;
+        const list = current.rdates ?? [];
+        for (const part of prop.value.split(",")) {
+          const iso = parseIcsDate(part, tzid);
+          if (iso) list.push(iso);
+        }
+        current.rdates = list;
+        break;
+      }
+      case "STATUS": {
+        const s = prop.value.trim().toUpperCase();
+        if (s === "CONFIRMED" || s === "CANCELLED" || s === "TENTATIVE") {
+          current.status = s;
+        }
+        break;
+      }
     }
   }
   return events;
@@ -302,12 +433,21 @@ export function parseIcs(input: string): IcsEvent[] {
 // expand into thousands of rows.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** A single BYDAY entry. `prefix=0` means "every <weekday> in the
+ *  period" (the default for WEEKLY); non-zero means the Nth occurrence
+ *  within the month (only meaningful for MONTHLY/YEARLY per RFC 5545). */
+interface BydayEntry {
+  prefix: number;
+  weekday: "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
+}
+
 interface RruleParts {
   freq: "DAILY" | "WEEKLY" | "MONTHLY" | null;
   interval: number;
   count: number | null;
   until: Date | null;
-  byday: string[]; // e.g. ["MO","WE","FR"]
+  byday: BydayEntry[];
+  bymonthday: number[]; // e.g. [1, 15] for "1st and 15th of every month"
 }
 
 function parseRruleString(rrule: string): RruleParts {
@@ -317,6 +457,7 @@ function parseRruleString(rrule: string): RruleParts {
     count: null,
     until: null,
     byday: [],
+    bymonthday: [],
   };
   for (const piece of rrule.split(";")) {
     const eq = piece.indexOf("=");
@@ -348,11 +489,31 @@ function parseRruleString(rrule: string): RruleParts {
         if (iso) parts.until = new Date(iso);
         break;
       }
-      case "BYDAY":
-        parts.byday = value
+      case "BYDAY": {
+        // Each entry is `[+-]?\d?WD` where WD ∈ {MO,TU,WE,TH,FR,SA,SU}.
+        // No prefix → every matching weekday in the period; numeric
+        // prefix → Nth occurrence (RFC 5545 §3.3.10, monthly/yearly only).
+        const entries: BydayEntry[] = [];
+        for (const piece of value.split(",")) {
+          const m = piece.trim().toUpperCase().match(
+            /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/,
+          );
+          if (!m) continue;
+          const prefix = m[1] ? parseInt(m[1], 10) : 0;
+          if (!Number.isFinite(prefix)) continue;
+          entries.push({
+            prefix,
+            weekday: m[2] as BydayEntry["weekday"],
+          });
+        }
+        parts.byday = entries;
+        break;
+      }
+      case "BYMONTHDAY":
+        parts.bymonthday = value
           .split(",")
-          .map((d) => d.trim().toUpperCase())
-          .filter((d) => /^(MO|TU|WE|TH|FR|SA|SU)$/.test(d));
+          .map((d) => parseInt(d.trim(), 10))
+          .filter((n) => Number.isFinite(n) && n >= 1 && n <= 31);
         break;
     }
   }
@@ -368,6 +529,41 @@ const WEEKDAY_TO_INDEX: Record<string, number> = {
   FR: 5,
   SA: 6,
 };
+
+/**
+ * Return the dates in (year, month) where `weekday` falls on the
+ * `prefix`-th occurrence within the month.
+ *
+ *   - `prefix > 0` — Nth occurrence (1 = first, 2 = second, …)
+ *   - `prefix < 0` — counted from the end (-1 = last, -2 = second-to-last)
+ *   - `prefix === 0` — every occurrence of the weekday in the month
+ *
+ * Returns `[]` when prefix is out of range for the month (e.g. `5MO`
+ * for a month that only has 4 Mondays).
+ */
+function nthWeekdaysOfMonth(
+  year: number,
+  month: number,
+  weekday: number,
+  prefix: number,
+): Date[] {
+  // Build the list of every matching weekday in the month.
+  const all: Date[] = [];
+  const first = new Date(Date.UTC(year, month, 1));
+  const offset = (weekday - first.getUTCDay() + 7) % 7;
+  for (let day = 1 + offset; day <= 31; day += 7) {
+    const candidate = new Date(Date.UTC(year, month, day));
+    if (candidate.getUTCMonth() !== month) break;
+    all.push(candidate);
+  }
+  if (prefix === 0) return all;
+  if (prefix > 0) {
+    const idx = prefix - 1;
+    return idx < all.length ? [all[idx]] : [];
+  }
+  const idx = all.length + prefix;
+  return idx >= 0 ? [all[idx]] : [];
+}
 
 /**
  * Expand a recurring `IcsEvent` into a series of single-occurrence
@@ -386,24 +582,88 @@ export function expandRrule(
   horizon: Date,
   maxOccurrences: number = 26,
 ): IcsEvent[] {
-  const base = [{ ...event }];
-  if (!event.rrule) return base;
-
-  const rule = parseRruleString(event.rrule);
-  if (!rule.freq) return base;
-
   const start = new Date(event.startIso);
   const end = new Date(event.endIso);
-  if (!Number.isFinite(start.getTime())) return base;
-  const durationMs = Math.max(0, end.getTime() - start.getTime());
+  const durationMs =
+    Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())
+      ? Math.max(0, end.getTime() - start.getTime())
+      : 0;
 
-  const out: IcsEvent[] = [event];
+  // EXDATE list as a Set of ISO strings for O(1) membership checks.
+  const excluded = new Set(event.exdates);
+  const isExcluded = (iso: string): boolean => excluded.has(iso);
+
+  /** Append RDATE-supplied occurrences and return. Bounded by horizon
+   *  + maxOccurrences. Used as the final pass for any expansion path
+   *  AND as the only pass when an event has no RRULE. */
+  const mergeRdates = (acc: IcsEvent[]): IcsEvent[] => {
+    if (!event.rdates.length) return acc;
+    const seen = new Set(acc.map((e) => e.startIso));
+    const sorted = [...event.rdates].sort();
+    for (const iso of sorted) {
+      if (acc.length >= maxOccurrences) break;
+      if (seen.has(iso)) continue;
+      if (isExcluded(iso)) continue;
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) continue;
+      if (d > horizon) continue;
+      acc.push({
+        ...event,
+        startIso: iso,
+        endIso: new Date(d.getTime() + durationMs).toISOString(),
+      });
+      seen.add(iso);
+    }
+    // Keep the output chronologically ordered for downstream callers.
+    return acc.sort((a, b) =>
+      a.startIso < b.startIso ? -1 : a.startIso > b.startIso ? 1 : 0,
+    );
+  };
+
+  // Fast paths that skip RRULE expansion entirely.
+  const baseOnly: IcsEvent[] = isExcluded(event.startIso) ? [] : [{ ...event }];
+  if (!event.rrule) return mergeRdates(baseOnly);
+
+  const rule = parseRruleString(event.rrule);
+  if (!rule.freq) return mergeRdates(baseOnly);
+  if (!Number.isFinite(start.getTime())) return mergeRdates(baseOnly);
+
+  // Base occurrence is always emitted unless explicitly excluded.
+  const out: IcsEvent[] = isExcluded(event.startIso) ? [] : [event];
   const stopAt = rule.until && rule.until < horizon ? rule.until : horizon;
+
+  // RFC 5545 COUNT counts raw rule occurrences (including ones EXDATE
+  // strips out); the published recurrence size is therefore COUNT
+  // minus the matching EXDATEs. Track raw count separately from the
+  // emitted-rows count so the budget is respected regardless of how
+  // many EXDATEs land inside the window. The base counts as raw=1.
+  let rawCount = 1;
+
+  /** Push an occurrence unless it's listed in EXDATE; always
+   *  increments the rawCount budget. Returns true when the loop
+   *  should stop (COUNT hit, maxOccurrences hit, or out-of-horizon
+   *  needs handling by the caller). */
+  const emit = (occurrence: Date): boolean => {
+    rawCount++;
+    const startIso = occurrence.toISOString();
+    if (!isExcluded(startIso)) {
+      out.push({
+        ...event,
+        startIso,
+        endIso: new Date(occurrence.getTime() + durationMs).toISOString(),
+      });
+      if (out.length >= maxOccurrences) return true;
+    }
+    if (rule.count && rawCount >= rule.count) return true;
+    return false;
+  };
 
   if (rule.freq === "WEEKLY" && rule.byday.length > 0) {
     // Iterate week-by-week, emit each requested weekday.
+    // Positional prefixes (1MO, -1FR) aren't meaningful for FREQ=WEEKLY
+    // per RFC 5545 — drop the prefix and use the weekday alone.
     const weekdayIndices = rule.byday
-      .map((d) => WEEKDAY_TO_INDEX[d])
+      .map((entry) => WEEKDAY_TO_INDEX[entry.weekday])
       .filter((n) => Number.isFinite(n))
       .sort((a, b) => a - b);
     let weekStart = new Date(start);
@@ -421,23 +681,91 @@ export function expandRrule(
           0,
         );
         if (occurrence <= start) continue;
-        if (occurrence > stopAt) return out;
-        out.push({
-          ...event,
-          startIso: occurrence.toISOString(),
-          endIso: new Date(occurrence.getTime() + durationMs).toISOString(),
-        });
-        if (out.length >= maxOccurrences) return out;
-        if (rule.count && out.length >= rule.count) return out;
+        if (occurrence > stopAt) return mergeRdates(out);
+        if (emit(occurrence)) return mergeRdates(out);
       }
       weekStart = new Date(weekStart);
       weekStart.setUTCDate(weekStart.getUTCDate() + 7 * rule.interval);
     }
-    return out;
+    return mergeRdates(out);
   }
 
-  // Generic FREQ=DAILY/WEEKLY/MONTHLY without BYDAY: step from the
-  // start date by `interval` units of the chosen frequency.
+  if (rule.freq === "MONTHLY" && rule.byday.length > 0) {
+    // FREQ=MONTHLY;BYDAY=2WE → every month on the 2nd Wednesday.
+    // BYDAY=WE (no prefix) → every Wednesday in every month.
+    // BYDAY=-1FR → last Friday of every month.
+    // Iterate month by month, compute the matching dates within each.
+    let monthCursor = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1),
+    );
+    while (out.length < maxOccurrences) {
+      const monthOccurrences: Date[] = [];
+      for (const entry of rule.byday) {
+        const wdIndex = WEEKDAY_TO_INDEX[entry.weekday];
+        if (!Number.isFinite(wdIndex)) continue;
+        const dates = nthWeekdaysOfMonth(
+          monthCursor.getUTCFullYear(),
+          monthCursor.getUTCMonth(),
+          wdIndex,
+          entry.prefix,
+        );
+        for (const d of dates) {
+          d.setUTCHours(
+            start.getUTCHours(),
+            start.getUTCMinutes(),
+            start.getUTCSeconds(),
+            0,
+          );
+          monthOccurrences.push(d);
+        }
+      }
+      // Process this month's hits in chronological order.
+      monthOccurrences.sort((a, b) => a.getTime() - b.getTime());
+      for (const occurrence of monthOccurrences) {
+        if (occurrence <= start) continue;
+        if (occurrence > stopAt) return mergeRdates(out);
+        if (emit(occurrence)) return mergeRdates(out);
+      }
+      monthCursor = new Date(monthCursor);
+      monthCursor.setUTCMonth(monthCursor.getUTCMonth() + rule.interval);
+    }
+    return mergeRdates(out);
+  }
+
+  if (rule.freq === "MONTHLY" && rule.bymonthday.length > 0) {
+    // FREQ=MONTHLY;BYMONTHDAY=15 → every month on the 15th. Common for
+    // EAA/AOPA chapter monthly meetings. Iterate month-by-month from the
+    // start, emit every day in BYMONTHDAY that lands within stopAt.
+    const sortedDays = [...rule.bymonthday].sort((a, b) => a - b);
+    let monthCursor = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1),
+    );
+    while (out.length < maxOccurrences) {
+      for (const day of sortedDays) {
+        const occurrence = new Date(
+          Date.UTC(
+            monthCursor.getUTCFullYear(),
+            monthCursor.getUTCMonth(),
+            day,
+            start.getUTCHours(),
+            start.getUTCMinutes(),
+            start.getUTCSeconds(),
+          ),
+        );
+        // Skip days that don't exist in this month (e.g. day=31 in Feb)
+        if (occurrence.getUTCMonth() !== monthCursor.getUTCMonth()) continue;
+        if (occurrence <= start) continue;
+        if (occurrence > stopAt) return mergeRdates(out);
+        if (emit(occurrence)) return mergeRdates(out);
+      }
+      monthCursor = new Date(monthCursor);
+      monthCursor.setUTCMonth(monthCursor.getUTCMonth() + rule.interval);
+    }
+    return mergeRdates(out);
+  }
+
+  // Generic FREQ=DAILY/WEEKLY/MONTHLY without BYDAY/BYMONTHDAY: step
+  // from the start date by `interval` units of the chosen frequency.
   let next = new Date(start);
   while (out.length < maxOccurrences) {
     if (rule.freq === "DAILY") {
@@ -451,13 +779,8 @@ export function expandRrule(
       next = new Date(next);
       next.setUTCMonth(next.getUTCMonth() + rule.interval);
     }
-    if (next > stopAt) return out;
-    out.push({
-      ...event,
-      startIso: next.toISOString(),
-      endIso: new Date(next.getTime() + durationMs).toISOString(),
-    });
-    if (rule.count && out.length >= rule.count) return out;
+    if (next > stopAt) return mergeRdates(out);
+    if (emit(next)) return mergeRdates(out);
   }
-  return out;
+  return mergeRdates(out);
 }

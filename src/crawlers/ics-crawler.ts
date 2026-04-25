@@ -2,6 +2,7 @@ import { config, type IcsCalendar } from "../config.js";
 import { parseIcsCalendar } from "../parsers/ics.js";
 import { runEventCrawler } from "./run-event-crawler.js";
 import { logger } from "../utils/logger.js";
+import { normalizeIcsUrl } from "../utils/ics.js";
 import type { CrawlResult } from "../types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,16 +26,25 @@ export async function crawlIcs(
     return [];
   }
   const src = config.sources.ics;
+  // Normalise webcal:// → https:// at the edge so config entries can
+  // copy-paste the user-facing "Add to calendar" URL verbatim. We
+  // rewrite the URL on both the fetch target AND the parser meta so
+  // the sourceUrl built by `parseIcsCalendar` uses the canonical
+  // https:// form (browsers can't open webcal://).
+  const calendars = (src.calendars ?? []).map((cal) => ({
+    ...cal,
+    url: normalizeIcsUrl(cal.url),
+  }));
   return [
     await runEventCrawler<IcsCalendar>({
       sourceName: src.name,
-      pages: (src.calendars ?? []).map((cal) => ({ url: cal.url, meta: cal })),
+      pages: calendars.map((cal) => ({ url: cal.url, meta: cal })),
       useProxy: false,
       parsePage: (text, page, sourceName) => {
         if (!page.meta) return [];
         return parseIcsCalendar(text, page.meta, sourceName);
       },
-      startContext: { calendars: (src.calendars ?? []).length },
+      startContext: { calendars: calendars.length },
     }),
   ];
 }
