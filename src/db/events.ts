@@ -46,7 +46,10 @@ if (
   );
 }
 
-type UpsertResult = "inserted" | "updated" | "skipped";
+// `UpsertOutcome` / `UpsertSkipReason` live in `events-types.ts` so
+// pure helpers can use them without importing the Supabase client.
+export type { UpsertOutcome, UpsertSkipReason } from "./events-types.js";
+import type { UpsertOutcome } from "./events-types.js";
 
 /**
  * Build title_{lang}, description_{lang}, slug_{lang} fields for the
@@ -104,7 +107,7 @@ export { contentHash, slugify };
  * on (external_source, source_url). On a match, we re-use the stored
  * translations unless the hash of (title + description) has changed.
  */
-export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
+export async function upsertEvent(event: ParsedEvent): Promise<UpsertOutcome> {
   // First call per process: surface a clear warning if the dedup
   // index migration hasn't run. Memoised inside the helper.
   await verifyEventsDedupIndex();
@@ -121,7 +124,7 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
       title: event.title,
       reason: validation.reason,
     });
-    return "skipped";
+    return { kind: "skipped", reason: validation.reason };
   }
 
   // Use the parser-supplied description when present (ICS feeds carry one);
@@ -238,7 +241,7 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
   if (existing) {
     if (existingHash === newHash) {
       logger.debug("Event unchanged — skip re-translate", { sourceUrl: event.sourceUrl });
-      return "skipped";
+      return { kind: "skipped", reason: "unchanged" };
     }
     const { error: updateError } = await supabase
       .from("aviation_events")
@@ -248,7 +251,7 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
     if (updateError) {
       throw new Error(`UPDATE aviation_events failed: ${updateError.message}`);
     }
-    return "updated";
+    return { kind: "updated" };
   }
 
   const insertPayload = {
@@ -266,11 +269,11 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
     // INSERT, treat that as an "update" signal from the crawler's perspective.
     if (insertError.code === "23505") {
       logger.debug("Concurrent insert — treating as skipped", { sourceUrl: event.sourceUrl });
-      return "skipped";
+      return { kind: "skipped", reason: "concurrent_insert" };
     }
     throw new Error(`INSERT aviation_events failed: ${insertError.message}`);
   }
 
-  return "inserted";
+  return { kind: "inserted" };
 }
 
