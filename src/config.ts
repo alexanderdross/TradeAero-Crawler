@@ -10,6 +10,8 @@ export interface SourceConfig {
    * sources leave this undefined.
    */
   events?: string[];
+  /** ICS calendar feeds (one entry per club / org). Used by the ics crawler. */
+  calendars?: IcsCalendar[];
   /** Use Bright Data proxy for this source (default: false) */
   useProxy?: boolean;
   /**
@@ -19,6 +21,42 @@ export interface SourceConfig {
    * TradeAero-Refactor/docs/COLD_EMAIL_CLAIM_CONCEPT.md §8.
    */
   sendColdEmailInvite?: boolean;
+}
+
+/**
+ * One iCalendar feed in the events pipeline. Add new entries to
+ * `config.sources.ics.calendars[]` as new clubs / orgs come online.
+ *
+ * Vetting checklist before adding a feed:
+ *   1. The calendar is meant for public consumption (linked from a
+ *      "Calendar" / "Events" page on the org's site).
+ *   2. The robots.txt of the host doesn't disallow the .ics path.
+ *   3. The feed URL is stable (not a per-session token).
+ *   4. defaultCategory is one of `seminar | competition | flying-camp |
+ *      airfield-festival | trade-fair | airshow | auction | webinar |
+ *      meetup | general` (matches event_categories.code).
+ */
+export interface IcsCalendar {
+  /** Human-readable label, surfaced as the venue fallback when the ICS
+   *  LOCATION is empty. e.g. "DULV Sport Pilot Calendar". */
+  name: string;
+  /** Canonical .ics URL. */
+  url: string;
+  /** ISO 3166-1 alpha-2 country code for events on this feed (most clubs
+   *  hold all events in one country). */
+  country: string;
+  /** event_categories.code to use when the ICS event has no CATEGORIES
+   *  line, or when none of its categories match an existing code. */
+  defaultCategory: string;
+  /** Optional default IANA timezone — overrides DTSTART;TZID when both
+   *  are absent. Defaults to "Europe/Berlin". */
+  timezone?: string;
+  /** Source language for the title/description. Drives the bilingual-min
+   *  translator (source + EN). Defaults to "en". */
+  sourceLocale?: string;
+  /** Friendly name shown as `aviation_events.organizer_name` when the ICS
+   *  feed doesn't carry per-event organisers (most don't). */
+  organiserName?: string;
 }
 
 export const config = {
@@ -79,6 +117,24 @@ export const config = {
       ],
       useProxy: true,
     },
+    /**
+     * Generic ICS / iCal feed source. Add per-club entries to
+     * `calendars` to ingest events without writing a per-site parser.
+     * Most aviation orgs already publish .ics feeds; this is the
+     * highest-leverage ingestion path before bespoke crawlers.
+     *
+     * Empty by default — populate after vetting per the IcsCalendar
+     * docstring above.
+     */
+    ics: {
+      name: "ics-feed",
+      baseUrl: "",
+      aircraft: [],
+      parts: [],
+      calendars: [] as IcsCalendar[],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    } satisfies SourceConfig,
     vereinsflieger: {
       name: "vereinsflieger.de",
       baseUrl: "https://vereinsflieger.de",

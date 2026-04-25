@@ -3,9 +3,10 @@ import { crawlHelmut } from "./crawlers/helmut-crawler.js";
 import { crawlAircraft24 } from "./crawlers/aircraft24-crawler.js";
 import { crawlAeromarkt } from "./crawlers/aeromarkt-crawler.js";
 import { crawlVereinsflieger } from "./crawlers/vereinsflieger-crawler.js";
+import { crawlIcs } from "./crawlers/ics-crawler.js";
 import { logger } from "./utils/logger.js";
 
-type Source = "helmut" | "aircraft24" | "aeromarkt" | "vereinsflieger";
+type Source = "helmut" | "aircraft24" | "aeromarkt" | "vereinsflieger" | "ics";
 type Target = "aircraft" | "parts" | "events" | "all";
 
 async function main(): Promise<void> {
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
     case "vereinsflieger":
       results.push(...(await crawlVereinsflieger(target)));
       break;
+    case "ics":
+      results.push(...(await crawlIcs(target)));
+      break;
   }
 
   // Print summary
@@ -71,7 +75,7 @@ async function main(): Promise<void> {
 }
 
 function parseSource(): Source {
-  const validSources: Source[] = ["helmut", "aircraft24", "aeromarkt", "vereinsflieger"];
+  const validSources: Source[] = ["helmut", "aircraft24", "aeromarkt", "vereinsflieger", "ics"];
   const arg = process.argv.find((a) => a.startsWith("--source"));
   if (!arg) return "helmut";
 
