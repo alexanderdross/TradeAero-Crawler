@@ -1,7 +1,8 @@
 # Event Crawlers — Tier-1 Source Plan
 
 > **Status (2026-04-25):** Tracking doc. Companion to `VEREINSFLIEGER_CONCEPT.md`
-> and `ICS_FEED_CONCEPT.md`.
+> and `ICS_FEED_CONCEPT.md`. Tier-2 aggregator/publisher sources are
+> tracked separately in `EVENT_SOURCES_TIER2_AGGREGATORS.md`.
 
 ---
 
