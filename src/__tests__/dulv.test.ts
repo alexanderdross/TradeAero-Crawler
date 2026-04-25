@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseDulvPage, parseDulvLastPageIndex } from "../parsers/dulv.js";
+import {
+  parseDulvPage,
+  parseDulvLastPageIndex,
+  extractDulvDetailTitle,
+} from "../parsers/dulv.js";
 
 const PAGE_URL = "https://www.dulv.de/veranstaltungen";
 const SOURCE = "dulv.de";
@@ -221,5 +225,34 @@ describe("parseDulvLastPageIndex", () => {
       <a href="/Veranstaltungen?other=1">first</a>
       <a href="/Veranstaltungen?page=2&foo=bar">3</a>`;
     expect(parseDulvLastPageIndex(html)).toBe(2);
+  });
+});
+
+describe("extractDulvDetailTitle", () => {
+  it("reads the title from the field--name-title span inside h1.page-title", () => {
+    const html = `
+      <h1 class="page-title">
+        <span class="field field--name-title field--type-string field--label-hidden">5. Waffel Fly-In auf dem Rennefeld </span>
+      </h1>`;
+    expect(extractDulvDetailTitle(html)).toBe("5. Waffel Fly-In auf dem Rennefeld");
+  });
+
+  it("falls back to h1.page-title text when the inner span is absent", () => {
+    const html = `<h1 class="page-title">UL-Fly-In Jesenwang</h1>`;
+    expect(extractDulvDetailTitle(html)).toBe("UL-Fly-In Jesenwang");
+  });
+
+  it("returns null when the page has no h1.page-title (404 / layout change)", () => {
+    expect(extractDulvDetailTitle("<html><body><h1>Other</h1></body></html>"))
+      .toBeNull();
+  });
+
+  it("returns null on empty input", () => {
+    expect(extractDulvDetailTitle("")).toBeNull();
+  });
+
+  it("collapses whitespace inside the title", () => {
+    const html = `<h1 class="page-title"><span class="field--name-title">  UL-Fly-In   Jesenwang  </span></h1>`;
+    expect(extractDulvDetailTitle(html)).toBe("UL-Fly-In Jesenwang");
   });
 });
