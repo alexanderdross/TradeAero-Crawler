@@ -26,6 +26,15 @@ const NOMINATIM_USER_AGENT =
 
 // Process-global gate. Crude but sufficient — geocoding is single-threaded
 // inside one crawler run, and parallel runs are unusual.
+//
+// Parallelism caveat: this counter is module-scoped, so two crawler
+// processes running concurrently (e.g. someone manually firing two
+// GitHub Action workflows that both reach this code) would NOT
+// coordinate and could exceed Nominatim's 1 req/s policy. The
+// existing GitHub Actions cron schedule explicitly staggers source
+// runs (see `.github/workflows/crawl-*.yml`) so cross-process
+// contention isn't a current concern. If the crawler ever fans out
+// into Workers / parallel runs, swap this for a Redis token bucket.
 let lastRequestMs = 0;
 
 async function rateLimit(): Promise<void> {

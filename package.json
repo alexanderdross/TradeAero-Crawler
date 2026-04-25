@@ -17,6 +17,7 @@
     "crawl:all": "tsx src/index.ts --source helmut && tsx src/index.ts --source aircraft24 && tsx src/index.ts --source aeromarkt && tsx src/index.ts --source vereinsflieger --target events && tsx src/index.ts --source ics --target events",
     "seed:reference-specs": "tsx src/scripts/seed-reference-specs.ts",
     "seed:ics-calendars": "tsx src/scripts/seed-ics-calendars.ts",
+    "seed:eaa-chapters": "tsx src/scripts/seed-eaa-chapter-ics.ts",
     "backfill:structured-data": "tsx src/scripts/backfill-structured-data.ts",
     "lint": "eslint src/",
     "test": "vitest run",

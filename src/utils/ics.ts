@@ -52,6 +52,10 @@ export interface IcsEvent {
   url: string | null;
   /** Lowercase split of `CATEGORIES:` — used for category mapping. */
   categories: string[];
+  /** Raw `RRULE:` value (e.g. `FREQ=WEEKLY;BYDAY=TU;UNTIL=20271231T000000Z`).
+   *  Captured for the bounded expander in `expandRrule()`; null when
+   *  the event isn't recurring. */
+  rrule: string | null;
 }
 
 /**
@@ -229,6 +233,7 @@ export function parseIcs(input: string): IcsEvent[] {
           location: current.location ?? "",
           url: current.url ?? null,
           categories: current.categories ?? [],
+          rrule: current.rrule ?? null,
         });
       }
       current = null;
@@ -273,7 +278,186 @@ export function parseIcs(input: string): IcsEvent[] {
         if (iso) current.endIso = iso;
         break;
       }
+      case "RRULE":
+        current.rrule = prop.value;
+        break;
     }
   }
   return events;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bounded RRULE expansion.
+//
+// Handles the common subset of RFC 5545 §3.3.10 used by aviation club
+// calendars: FREQ=DAILY|WEEKLY|MONTHLY, optional INTERVAL, optional
+// COUNT, optional UNTIL, optional BYDAY for WEEKLY (e.g. "every Tu").
+// Out-of-scope cases (BYSETPOS, BYMONTH, BYMONTHDAY without FREQ
+// constraints, hourly/minutely/secondly, exception dates) fall back
+// to "first occurrence only" — matches the previous behaviour, never
+// regresses.
+//
+// Capped at `maxOccurrences` (default 26) AND the configured horizon
+// (default 90 days from `now`) so a malformed UNTIL/COUNT can't
+// expand into thousands of rows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RruleParts {
+  freq: "DAILY" | "WEEKLY" | "MONTHLY" | null;
+  interval: number;
+  count: number | null;
+  until: Date | null;
+  byday: string[]; // e.g. ["MO","WE","FR"]
+}
+
+function parseRruleString(rrule: string): RruleParts {
+  const parts: RruleParts = {
+    freq: null,
+    interval: 1,
+    count: null,
+    until: null,
+    byday: [],
+  };
+  for (const piece of rrule.split(";")) {
+    const eq = piece.indexOf("=");
+    if (eq <= 0) continue;
+    const key = piece.slice(0, eq).toUpperCase();
+    const value = piece.slice(eq + 1);
+    switch (key) {
+      case "FREQ": {
+        const f = value.toUpperCase();
+        if (f === "DAILY" || f === "WEEKLY" || f === "MONTHLY") {
+          parts.freq = f;
+        }
+        break;
+      }
+      case "INTERVAL": {
+        const n = parseInt(value, 10);
+        if (Number.isFinite(n) && n > 0) parts.interval = n;
+        break;
+      }
+      case "COUNT": {
+        const n = parseInt(value, 10);
+        if (Number.isFinite(n) && n > 0) parts.count = n;
+        break;
+      }
+      case "UNTIL": {
+        // RFC 5545 UNTIL is YYYYMMDD or YYYYMMDDTHHMMSSZ. Reuse the
+        // existing parser which yields ISO 8601.
+        const iso = parseIcsDate(value, null);
+        if (iso) parts.until = new Date(iso);
+        break;
+      }
+      case "BYDAY":
+        parts.byday = value
+          .split(",")
+          .map((d) => d.trim().toUpperCase())
+          .filter((d) => /^(MO|TU|WE|TH|FR|SA|SU)$/.test(d));
+        break;
+    }
+  }
+  return parts;
+}
+
+const WEEKDAY_TO_INDEX: Record<string, number> = {
+  SU: 0,
+  MO: 1,
+  TU: 2,
+  WE: 3,
+  TH: 4,
+  FR: 5,
+  SA: 6,
+};
+
+/**
+ * Expand a recurring `IcsEvent` into a series of single-occurrence
+ * events bounded by a horizon. The base event is always the first
+ * member of the returned array.
+ *
+ * @param event   The parsed VEVENT carrying an `rrule` value.
+ * @param horizon Latest occurrence start to consider. Past-the-horizon
+ *                instances are dropped without expanding further.
+ * @param maxOccurrences Hard cap regardless of the rule. Defaults to
+ *                26 — covers a year of weekly meetings without
+ *                producing unbounded fan-out.
+ */
+export function expandRrule(
+  event: IcsEvent,
+  horizon: Date,
+  maxOccurrences: number = 26,
+): IcsEvent[] {
+  const base = [{ ...event }];
+  if (!event.rrule) return base;
+
+  const rule = parseRruleString(event.rrule);
+  if (!rule.freq) return base;
+
+  const start = new Date(event.startIso);
+  const end = new Date(event.endIso);
+  if (!Number.isFinite(start.getTime())) return base;
+  const durationMs = Math.max(0, end.getTime() - start.getTime());
+
+  const out: IcsEvent[] = [event];
+  const stopAt = rule.until && rule.until < horizon ? rule.until : horizon;
+
+  if (rule.freq === "WEEKLY" && rule.byday.length > 0) {
+    // Iterate week-by-week, emit each requested weekday.
+    const weekdayIndices = rule.byday
+      .map((d) => WEEKDAY_TO_INDEX[d])
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b);
+    let weekStart = new Date(start);
+    // Anchor weekStart to the Sunday of the start's week (0).
+    weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay());
+    while (out.length < maxOccurrences) {
+      for (const wd of weekdayIndices) {
+        const occurrence = new Date(weekStart);
+        occurrence.setUTCDate(occurrence.getUTCDate() + wd);
+        // Preserve the original time-of-day.
+        occurrence.setUTCHours(
+          start.getUTCHours(),
+          start.getUTCMinutes(),
+          start.getUTCSeconds(),
+          0,
+        );
+        if (occurrence <= start) continue;
+        if (occurrence > stopAt) return out;
+        out.push({
+          ...event,
+          startIso: occurrence.toISOString(),
+          endIso: new Date(occurrence.getTime() + durationMs).toISOString(),
+        });
+        if (out.length >= maxOccurrences) return out;
+        if (rule.count && out.length >= rule.count) return out;
+      }
+      weekStart = new Date(weekStart);
+      weekStart.setUTCDate(weekStart.getUTCDate() + 7 * rule.interval);
+    }
+    return out;
+  }
+
+  // Generic FREQ=DAILY/WEEKLY/MONTHLY without BYDAY: step from the
+  // start date by `interval` units of the chosen frequency.
+  let next = new Date(start);
+  while (out.length < maxOccurrences) {
+    if (rule.freq === "DAILY") {
+      next = new Date(next);
+      next.setUTCDate(next.getUTCDate() + rule.interval);
+    } else if (rule.freq === "WEEKLY") {
+      next = new Date(next);
+      next.setUTCDate(next.getUTCDate() + 7 * rule.interval);
+    } else {
+      // MONTHLY
+      next = new Date(next);
+      next.setUTCMonth(next.getUTCMonth() + rule.interval);
+    }
+    if (next > stopAt) return out;
+    out.push({
+      ...event,
+      startIso: next.toISOString(),
+      endIso: new Date(next.getTime() + durationMs).toISOString(),
+    });
+    if (rule.count && out.length >= rule.count) return out;
+  }
+  return out;
 }

@@ -1,5 +1,6 @@
 import { contentHash, slugify } from "./event-dedup.js";
 import { supabase } from "./client.js";
+import { verifyEventsDedupIndex } from "./events-startup-checks.js";
 import { getEventCategoryIdByCode } from "./categories.js";
 import { translateListing } from "../utils/translate.js";
 import { generateLocalizedSlugs } from "../utils/slug.js";
@@ -9,10 +10,40 @@ import { geocode } from "../utils/geocode.js";
 import type { ParsedEvent } from "../types.js";
 import { synthesizeEventDescription } from "../parsers/vereinsflieger.js";
 
+// IMPORTANT: this 14-element list MUST stay aligned with `APP_LOCALES`
+// in `tradeaero-refactor/src/i18n/locales.ts` and with the per-locale
+// `title_<lang>` / `description_<lang>` / `slug_<lang>` columns on
+// `aviation_events`. The crawler is a separate npm package so we
+// can't import the constant directly; the runtime sentinel below
+// guards against drift on first upsert.
 const LANGS = [
   "en", "de", "fr", "es", "it", "pl", "cs", "sv", "nl", "pt", "ru", "tr", "el", "no",
 ] as const;
 type Lang = (typeof LANGS)[number];
+
+/** Hand-pinned by the most recent refactor-side audit. Bump this when
+ *  intentionally adding a new locale on both sides; the sentinel below
+ *  catches accidental drift (e.g. a copy-paste deletion). */
+const EXPECTED_LANG_COUNT = 14;
+const EXPECTED_FIRST_LANG = "en";
+const EXPECTED_LAST_LANG = "no";
+
+if (
+  LANGS.length !== EXPECTED_LANG_COUNT ||
+  LANGS[0] !== EXPECTED_FIRST_LANG ||
+  LANGS[LANGS.length - 1] !== EXPECTED_LAST_LANG
+) {
+  // Throw at module-load: a desync between the crawler's LANGS and the
+  // refactor side's APP_LOCALES would silently produce events with
+  // missing locale columns. Better to fail the run than to publish
+  // half-translated rows.
+  throw new Error(
+    `Crawler LANGS desynced from refactor APP_LOCALES — expected ` +
+      `${EXPECTED_LANG_COUNT} locales starting with "${EXPECTED_FIRST_LANG}" ` +
+      `and ending with "${EXPECTED_LAST_LANG}", got [${LANGS.join(", ")}]. ` +
+      `Update both src/db/events.ts and tradeaero-refactor/src/i18n/locales.ts together.`,
+  );
+}
 
 type UpsertResult = "inserted" | "updated" | "skipped";
 
@@ -73,6 +104,10 @@ export { contentHash, slugify };
  * translations unless the hash of (title + description) has changed.
  */
 export async function upsertEvent(event: ParsedEvent): Promise<UpsertResult> {
+  // First call per process: surface a clear warning if the dedup
+  // index migration hasn't run. Memoised inside the helper.
+  await verifyEventsDedupIndex();
+
   // Use the parser-supplied description when present (ICS feeds carry one);
   // otherwise synthesize from the available metadata (Vereinsflieger).
   const description =

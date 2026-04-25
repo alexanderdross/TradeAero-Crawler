@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
-import { parseIcs, type IcsEvent } from "../utils/ics.js";
+import { parseIcs, expandRrule, type IcsEvent } from "../utils/ics.js";
 import { cleanText } from "../utils/html.js";
 import { logger } from "../utils/logger.js";
 import type { ParsedEvent } from "../types.js";
 import type { IcsCalendar } from "../config.js";
+
+/** Horizon for RRULE expansion: 90 days from the run start. Tunable
+ *  if a specific feed needs longer reach. */
+const RRULE_HORIZON_DAYS = 90;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ICS-feed parser.
@@ -86,7 +90,34 @@ export function parseIcsCalendar(
   calendar: IcsCalendar,
   sourceName: string,
 ): ParsedEvent[] {
-  const events = parseIcs(icsText);
+  const horizon = new Date();
+  horizon.setUTCDate(horizon.getUTCDate() + RRULE_HORIZON_DAYS);
+
+  // `parseIcs` returns one row per VEVENT; expand recurring events
+  // here so each occurrence becomes a row in `aviation_events` with
+  // its own dedup key (sha1(title|start|organizer)). Bounded to the
+  // 90-day horizon to keep weekly clubs from generating thousands of
+  // far-future rows.
+  const baseEvents = parseIcs(icsText);
+  const events: IcsEvent[] = [];
+  let expandedRecurrences = 0;
+  for (const ev of baseEvents) {
+    if (ev.rrule) {
+      const occurrences = expandRrule(ev, horizon);
+      events.push(...occurrences);
+      if (occurrences.length > 1) expandedRecurrences += occurrences.length - 1;
+    } else {
+      events.push(ev);
+    }
+  }
+  if (expandedRecurrences > 0) {
+    logger.debug("Expanded recurring ICS events", {
+      calendar: calendar.name,
+      extraOccurrences: expandedRecurrences,
+      horizonDays: RRULE_HORIZON_DAYS,
+    });
+  }
+
   const out: ParsedEvent[] = [];
   let droppedNoSummary = 0;
   let droppedNoStart = 0;
@@ -94,6 +125,12 @@ export function parseIcsCalendar(
     // Drop rows missing required fields, but log enough context so a
     // structurally-broken feed is visible in the run summary instead of
     // silently producing a 0-event crawl.
+    //
+    // UID-less events are intentionally **kept**: our dedup key is
+    // sha1(title|startIso|organiser), synthesised in
+    // `parseIcsCalendar` below — we never read `ev.uid`. Many smaller
+    // calendar exporters omit UID, and rejecting them would drop
+    // legitimate events for no benefit.
     if (!ev.summary) {
       droppedNoSummary++;
       continue;
