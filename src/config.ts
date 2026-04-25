@@ -151,6 +151,72 @@ export const config = {
       useProxy: false,
       sendColdEmailInvite: false,
     },
+    /**
+     * Tier-2 aggregator: hand-curated /ausflugstipps/ list (trade
+     * fairs, airshows, fly-ins). HTML, single page, no proxy.
+     */
+    pilotenausbildung: {
+      name: "pilotenausbildung.net",
+      baseUrl: "https://pilotenausbildung.net",
+      aircraft: [],
+      parts: [],
+      events: ["https://pilotenausbildung.net/ausflugstipps/"],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-2 publisher: magazine /termine/ listings, paginated.
+     * Cloudflare CDN but cacheable; default Chrome UA passes. Never
+     * advertise as ClaudeBot/GPTBot — explicitly Disallowed.
+     */
+    fliegermagazin: {
+      name: "fliegermagazin.de",
+      baseUrl: "https://www.fliegermagazin.de",
+      aircraft: [],
+      parts: [],
+      events: ["https://www.fliegermagazin.de/termine/"],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-2 community forum: UL pilot meetups + fly-ins. JSON-LD
+     * embedded per row, single page, no proxy.
+     */
+    ulforum: {
+      name: "ulforum.de",
+      baseUrl: "https://www.ulforum.de",
+      aircraft: [],
+      parts: [],
+      events: ["https://www.ulforum.de/veranstaltungen"],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-2 industry association: commercial aviation conferences
+     * worldwide. Sitecore CMS, paginated. No proxy.
+     */
+    iata: {
+      name: "iata.org",
+      baseUrl: "https://www.iata.org",
+      aircraft: [],
+      parts: [],
+      events: ["https://www.iata.org/en/events/"],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-2 blog: WordPress + Modern Events Calendar RSS feed.
+     * Direct fetch of /events/feed/, no HTML scraping.
+     */
+    pilotFrank: {
+      name: "pilot-frank.de",
+      baseUrl: "https://pilot-frank.de",
+      aircraft: [],
+      parts: [],
+      events: ["https://pilot-frank.de/events/feed/"],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
   } satisfies Record<string, SourceConfig>,
   /** Default country for German sources */
   defaultCountry: "Germany",

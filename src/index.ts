@@ -4,9 +4,24 @@ import { crawlAircraft24 } from "./crawlers/aircraft24-crawler.js";
 import { crawlAeromarkt } from "./crawlers/aeromarkt-crawler.js";
 import { crawlVereinsflieger } from "./crawlers/vereinsflieger-crawler.js";
 import { crawlIcs } from "./crawlers/ics-crawler.js";
+import { crawlPilotenausbildung } from "./crawlers/pilotenausbildung-crawler.js";
+import { crawlFliegermagazin } from "./crawlers/fliegermagazin-crawler.js";
+import { crawlUlforum } from "./crawlers/ulforum-crawler.js";
+import { crawlIata } from "./crawlers/iata-crawler.js";
+import { crawlPilotFrank } from "./crawlers/pilot-frank-crawler.js";
 import { logger } from "./utils/logger.js";
 
-type Source = "helmut" | "aircraft24" | "aeromarkt" | "vereinsflieger" | "ics";
+type Source =
+  | "helmut"
+  | "aircraft24"
+  | "aeromarkt"
+  | "vereinsflieger"
+  | "ics"
+  | "pilotenausbildung"
+  | "fliegermagazin"
+  | "ulforum"
+  | "iata"
+  | "pilot-frank";
 type Target = "aircraft" | "parts" | "events" | "all";
 
 async function main(): Promise<void> {
@@ -45,6 +60,21 @@ async function main(): Promise<void> {
     case "ics":
       results.push(...(await crawlIcs(target)));
       break;
+    case "pilotenausbildung":
+      results.push(...(await crawlPilotenausbildung(target)));
+      break;
+    case "fliegermagazin":
+      results.push(...(await crawlFliegermagazin(target)));
+      break;
+    case "ulforum":
+      results.push(...(await crawlUlforum(target)));
+      break;
+    case "iata":
+      results.push(...(await crawlIata(target)));
+      break;
+    case "pilot-frank":
+      results.push(...(await crawlPilotFrank(target)));
+      break;
   }
 
   // Print summary
@@ -75,7 +105,18 @@ async function main(): Promise<void> {
 }
 
 function parseSource(): Source {
-  const validSources: Source[] = ["helmut", "aircraft24", "aeromarkt", "vereinsflieger", "ics"];
+  const validSources: Source[] = [
+    "helmut",
+    "aircraft24",
+    "aeromarkt",
+    "vereinsflieger",
+    "ics",
+    "pilotenausbildung",
+    "fliegermagazin",
+    "ulforum",
+    "iata",
+    "pilot-frank",
+  ];
   const arg = process.argv.find((a) => a.startsWith("--source"));
   if (!arg) return "helmut";
 
