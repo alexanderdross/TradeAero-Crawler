@@ -4,6 +4,7 @@ import {
   expandRrule,
   normalizeIcsUrl,
   parseIcsDuration,
+  looksLikeIcalendar,
   type IcsEvent,
 } from "../utils/ics.js";
 import { parseIcsCalendar } from "../parsers/ics.js";
@@ -37,6 +38,108 @@ function vevent(body: string): string {
     "END:VCALENDAR",
   ].join("\r\n");
 }
+
+describe("looksLikeIcalendar", () => {
+  it("recognises a minimal payload", () => {
+    expect(looksLikeIcalendar("BEGIN:VCALENDAR\r\nEND:VCALENDAR")).toBe(true);
+  });
+
+  it("is case-insensitive on the header", () => {
+    expect(looksLikeIcalendar("begin:vcalendar\nend:vcalendar")).toBe(true);
+  });
+
+  it("tolerates leading blank lines (some publishers add them)", () => {
+    expect(looksLikeIcalendar("\n\nBEGIN:VCALENDAR\nEND:VCALENDAR")).toBe(true);
+  });
+
+  it("strips a UTF-8 BOM before the header check", () => {
+    expect(looksLikeIcalendar("﻿BEGIN:VCALENDAR\nEND:VCALENDAR")).toBe(
+      true,
+    );
+  });
+
+  it("rejects payloads where BEGIN:VCALENDAR appears mid-stream after non-whitespace", () => {
+    const html =
+      "<html><body>Forbidden\nBEGIN:VCALENDAR\nEND:VCALENDAR</body></html>";
+    expect(looksLikeIcalendar(html)).toBe(false);
+  });
+
+  it("rejects HTML error pages", () => {
+    expect(
+      looksLikeIcalendar("<!DOCTYPE html><html><head><title>Forbidden</title>"),
+    ).toBe(false);
+  });
+
+  it("rejects empty payloads", () => {
+    expect(looksLikeIcalendar("")).toBe(false);
+  });
+});
+
+describe("parseIcsCalendar — payload sanity gate", () => {
+  it("returns [] without throwing when the payload isn't iCalendar", () => {
+    const html = "<!DOCTYPE html><html><body>Login required</body></html>";
+    const out = parseIcsCalendar(html, calendar, "ics-feed");
+    expect(out).toEqual([]);
+  });
+});
+
+describe("parseIcs — X-WR-TIMEZONE fallback", () => {
+  it("uses X-WR-TIMEZONE when an event DTSTART omits TZID", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "X-WR-TIMEZONE:America/New_York",
+      "BEGIN:VEVENT",
+      "UID:1",
+      "SUMMARY:Chapter Meeting",
+      // No TZID — floating wall-clock at 19:00 local. New York in
+      // June is UTC-4, so 19:00 local → 23:00 UTC.
+      "DTSTART:20260601T190000",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const ev = parseIcs(ics)[0];
+    expect(ev.startIso).toBe("2026-06-01T23:00:00.000Z");
+    expect(ev.tzid).toBe("America/New_York");
+  });
+
+  it("per-event TZID still wins over X-WR-TIMEZONE", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "X-WR-TIMEZONE:America/New_York",
+      "BEGIN:VEVENT",
+      "UID:1",
+      "SUMMARY:Chapter Meeting",
+      "DTSTART;TZID=Europe/Berlin:20260601T190000",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const ev = parseIcs(ics)[0];
+    // Berlin in June is UTC+2 → 19:00 → 17:00 UTC.
+    expect(ev.startIso).toBe("2026-06-01T17:00:00.000Z");
+    expect(ev.tzid).toBe("Europe/Berlin");
+  });
+
+  it("falls back to Europe/Berlin when neither X-WR-TIMEZONE nor TZID is present", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "BEGIN:VEVENT",
+      "UID:1",
+      "SUMMARY:Test",
+      "DTSTART:20260601T190000",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const ev = parseIcs(ics)[0];
+    // Berlin DST → 19:00 → 17:00 UTC.
+    expect(ev.startIso).toBe("2026-06-01T17:00:00.000Z");
+  });
+});
 
 describe("normalizeIcsUrl", () => {
   it("rewrites webcal:// to https://", () => {
