@@ -15,6 +15,7 @@ import {
   resetTranslationTokenUsage,
 } from "../utils/translate.js";
 import { logger } from "../utils/logger.js";
+import { buildValidationDropSummary } from "./run-summary.js";
 import type { CrawlResult, ParsedEvent } from "../types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +88,10 @@ export async function runEventCrawler<TPayload = unknown>(
   let listingsUpdated = 0;
   let listingsSkipped = 0;
   let pagesProcessed = 0;
+  // Per-reason skip counts, surfaced in the run's warnings[] when
+  // validation-class drops occur. Initialized lazily so a clean run
+  // doesn't carry an empty object through.
+  const skipReasons: Record<string, number> = {};
 
   const dbRunId = await startCrawlRun(cfg.sourceName, "events");
   resetProxyBytesTransferred();
@@ -125,7 +130,7 @@ export async function runEventCrawler<TPayload = unknown>(
         for (const ev of events) {
           try {
             const result = await upsertEvent(ev);
-            switch (result) {
+            switch (result.kind) {
               case "inserted":
                 listingsInserted++;
                 break;
@@ -134,6 +139,8 @@ export async function runEventCrawler<TPayload = unknown>(
                 break;
               case "skipped":
                 listingsSkipped++;
+                skipReasons[result.reason] =
+                  (skipReasons[result.reason] ?? 0) + 1;
                 break;
             }
           } catch (err) {
@@ -168,6 +175,11 @@ export async function runEventCrawler<TPayload = unknown>(
       logger.warn(w);
       warnings.push(w);
     }
+    const validationSummary = buildValidationDropSummary(skipReasons);
+    if (validationSummary) {
+      logger.warn(validationSummary, { source: cfg.sourceName });
+      warnings.push(validationSummary);
+    }
 
     if (dbRunId) {
       const tokens = getTranslationTokenUsage();
@@ -201,6 +213,7 @@ export async function runEventCrawler<TPayload = unknown>(
     inserted: listingsInserted,
     updated: listingsUpdated,
     skipped: listingsSkipped,
+    skipReasons,
     errors: errors.length,
   });
 
