@@ -211,4 +211,28 @@ export function parseDulvLastPageIndex(html: string): number {
   return Math.min(max, 9);
 }
 
+/**
+ * Extract the canonical event title from a DULV detail page (`/node/N`).
+ *
+ * The detail page renders the operator-typed title in
+ * `<h1 class="page-title"><span class="field--name-title">…</span></h1>`.
+ * That's the cleanest title source — the listing page never carries it.
+ *
+ * Returns the trimmed title text, or null when the selector doesn't match
+ * (404 page, layout change, …) so the crawler shim can fall back to the
+ * listing-page heuristic title without dropping the row.
+ */
+export function extractDulvDetailTitle(html: string): string | null {
+  const $ = cheerio.load(html);
+  // Prefer the `<span class="field--name-title">` inside h1 — DULV nests
+  // the actual title there. Fall back to the h1 text if the span is
+  // missing (older / customised templates).
+  const span = cleanText(
+    $("h1.page-title .field--name-title").first().text(),
+  );
+  if (span) return span;
+  const h1 = cleanText($("h1.page-title").first().text());
+  return h1 || null;
+}
+
 export const _dulvInternals = { sha1Short, pickTitle, classifyCategory };

@@ -63,6 +63,24 @@ export interface EventCrawlerConfig<TPayload = unknown> {
     page: EventCrawlPage<TPayload>,
     sourceName: string,
   ) => ParsedEvent[];
+  /**
+   * Optional async post-parse step to enrich the event list before
+   * upsert — typically fetches per-event detail pages and replaces a
+   * listing-page heuristic with the canonical value (e.g. DULV's
+   * `<h1 class="page-title">` title vs. the listing page's image-alt
+   * fallback). Receives the same `useProxy` flag as `parsePage` so
+   * the enricher can route through the same fetch path.
+   *
+   * Errors thrown from enrichEvents abort the page (caught by the
+   * outer per-page handler), but a per-event enrichment failure
+   * should be swallowed inside the callback so one bad detail page
+   * doesn't drop the whole listing.
+   */
+  enrichEvents?: (
+    events: ParsedEvent[],
+    page: EventCrawlPage<TPayload>,
+    useProxy: boolean,
+  ) => Promise<ParsedEvent[]>;
   /** Optional pre-flight log line context. */
   startContext?: Record<string, unknown>;
 }
@@ -118,7 +136,10 @@ export async function runEventCrawler<TPayload = unknown>(
     for (const page of enabledPages) {
       try {
         const payload = await fetchOne(page.url, cfg.useProxy ?? false);
-        const events = cfg.parsePage(payload, page, cfg.sourceName);
+        let events = cfg.parsePage(payload, page, cfg.sourceName);
+        if (cfg.enrichEvents) {
+          events = await cfg.enrichEvents(events, page, cfg.useProxy ?? false);
+        }
         pagesProcessed += 1;
         listingsFound += events.length;
         logger.info(`Parsed page`, {
