@@ -2,9 +2,12 @@ name: "Crawl Vereinsflieger"
 
 on:
   schedule:
-    # Daily at 09:00 UTC — scheduled after helmut (06:00) / aircraft24 (07:00)
-    # / aeromarkt (08:00) so a "crawl-all" admin trigger doesn't stack.
-    - cron: "0 9 * * *"
+    # Weekly on Sunday at 09:00 UTC. Events change slowly (orgs publish
+    # them weeks-to-months ahead), so daily was overkill and adds noise
+    # to the admin run-history tab. Admins can still fire the crawler
+    # on-demand from /dashboard/admin/#crawler when they want a refresh
+    # between scheduled runs.
+    - cron: "0 9 * * 0"
   workflow_dispatch:
     inputs:
       target:
