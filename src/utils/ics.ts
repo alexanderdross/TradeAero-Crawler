@@ -283,9 +283,12 @@ function zonedTimeToUtc(isoLocal: string, tz: string): number | null {
  */
 export function looksLikeIcalendar(input: string): boolean {
   if (typeof input !== "string" || input.length === 0) return false;
-  // Strip optional UTF-8 BOM, then require BEGIN:VCALENDAR at the
-  // very start (no `m` flag — `^` anchors to position 0 only).
-  const stripped = input.replace(/^﻿/, "").trimStart();
+  // Strip optional UTF-8 BOM (U+FEFF) then any leading whitespace.
+  // The BOM check uses charCodeAt rather than a regex literal so the
+  // source stays ASCII-clean for ESLint's no-irregular-whitespace rule.
+  let i = 0;
+  if (input.charCodeAt(0) === 0xfeff) i = 1;
+  const stripped = input.slice(i).trimStart();
   return /^BEGIN:VCALENDAR\b/i.test(stripped);
 }
 
