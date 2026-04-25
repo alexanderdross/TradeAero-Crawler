@@ -9,6 +9,10 @@ import { crawlFliegermagazin } from "./crawlers/fliegermagazin-crawler.js";
 import { crawlUlforum } from "./crawlers/ulforum-crawler.js";
 import { crawlIata } from "./crawlers/iata-crawler.js";
 import { crawlPilotFrank } from "./crawlers/pilot-frank-crawler.js";
+import { crawlDulv } from "./crawlers/dulv-crawler.js";
+import { crawlAeroFriedrichshafen } from "./crawlers/aero-friedrichshafen-crawler.js";
+import { crawlNbaa } from "./crawlers/nbaa-crawler.js";
+import { crawlEurocontrol } from "./crawlers/eurocontrol-crawler.js";
 import { logger } from "./utils/logger.js";
 
 type Source =
@@ -21,7 +25,11 @@ type Source =
   | "fliegermagazin"
   | "ulforum"
   | "iata"
-  | "pilot-frank";
+  | "pilot-frank"
+  | "dulv"
+  | "aero-friedrichshafen"
+  | "nbaa"
+  | "eurocontrol";
 type Target = "aircraft" | "parts" | "events" | "all";
 
 async function main(): Promise<void> {
@@ -75,6 +83,18 @@ async function main(): Promise<void> {
     case "pilot-frank":
       results.push(...(await crawlPilotFrank(target)));
       break;
+    case "dulv":
+      results.push(...(await crawlDulv(target)));
+      break;
+    case "aero-friedrichshafen":
+      results.push(...(await crawlAeroFriedrichshafen(target)));
+      break;
+    case "nbaa":
+      results.push(...(await crawlNbaa(target)));
+      break;
+    case "eurocontrol":
+      results.push(...(await crawlEurocontrol(target)));
+      break;
   }
 
   // Print summary
@@ -116,6 +136,10 @@ function parseSource(): Source {
     "ulforum",
     "iata",
     "pilot-frank",
+    "dulv",
+    "aero-friedrichshafen",
+    "nbaa",
+    "eurocontrol",
   ];
   const arg = process.argv.find((a) => a.startsWith("--source"));
   if (!arg) return "helmut";
