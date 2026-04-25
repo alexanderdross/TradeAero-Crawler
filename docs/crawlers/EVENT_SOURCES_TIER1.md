@@ -108,7 +108,8 @@ For an ICS source:
 0. **Discover the candidate feed URL.** Run:
 
    ```bash
-   npm run seed:ics-calendars                  # all 11 Tier-1 orgs
+   npm run seed:ics-calendars                  # all 11 Tier-1 orgs (direct)
+   npm run seed:ics-calendars -- --proxy       # via Bright Data residential
    npm run seed:ics-calendars -- --url=<url>   # a single one-off org
    npm run seed:ics-calendars -- --json        # machine-readable
    ```
@@ -119,6 +120,11 @@ For an ICS source:
    finds, formatted as a ready-to-paste `IcsCalendar` entry. Orgs
    with no exposed feed are listed under a "needs bespoke HTML
    crawler" section so you know to escalate to the HTML path.
+
+   Pass `--proxy` when direct fetches hit anti-bot or
+   datacentre-IP blocks (FAI, NBAA, AOPA tend to 403 from cloud
+   IPs). Same env var the aircraft24 / aeromarkt crawlers use
+   (`BRIGHT_DATA_PROXY_URL`) — no extra config.
 1. Confirm the feed URL is stable (no per-session token) and
    public-facing (linked from a "Calendar" page).
 2. Check the host's `robots.txt` doesn't disallow the `.ics` path.

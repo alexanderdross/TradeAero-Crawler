@@ -15,6 +15,8 @@ import { logger } from "../utils/logger.js";
 //
 //   npm run seed:ics-calendars                 # run against the default list
 //   npm run seed:ics-calendars -- --json       # machine-readable JSON output
+//   npm run seed:ics-calendars -- --proxy      # route fetches through Bright
+//                                              # Data (set BRIGHT_DATA_PROXY_URL)
 //   npm run seed:ics-calendars -- --url=https://… [--url=…]
 //                                              # custom one-off URLs
 //
@@ -22,6 +24,12 @@ import { logger } from "../utils/logger.js";
 // reviews each entry, fills in `country`, `defaultCategory`, and
 // `sourceLocale` per the vetting checklist in ICS_FEED_CONCEPT.md, and
 // commits the additions to `config.sources.ics.calendars[]`.
+//
+// When direct fetches hit anti-bot or geo blocks (FAI / NBAA / etc.
+// frequently 403 from datacentre IPs), pass `--proxy` so fetchPage
+// routes through the same Bright Data residential proxy used by the
+// aircraft24 / aeromarkt crawlers. Same env var
+// (`BRIGHT_DATA_PROXY_URL`) — no extra config.
 //
 // Why a script and not direct config wiring? See
 // EVENT_SOURCES_TIER1.md §3 — every feed needs human ToS / robots.txt
@@ -234,12 +242,15 @@ interface RunReport {
   error?: string;
 }
 
-async function run(targets: SeedTarget[]): Promise<RunReport[]> {
+async function run(
+  targets: SeedTarget[],
+  options: { proxy: boolean },
+): Promise<RunReport[]> {
   const reports: RunReport[] = [];
   for (const t of targets) {
     try {
-      logger.info("Scanning", { name: t.name, url: t.url });
-      const html = await fetchPage(t.url, { proxy: false });
+      logger.info("Scanning", { name: t.name, url: t.url, proxy: options.proxy });
+      const html = await fetchPage(t.url, { proxy: options.proxy });
       const feeds = extractIcsFeeds(html, t.url);
       reports.push({ target: t, feeds });
     } catch (err) {
@@ -254,18 +265,21 @@ async function run(targets: SeedTarget[]): Promise<RunReport[]> {
 function parseArgs(): {
   customUrls: string[];
   json: boolean;
+  proxy: boolean;
 } {
   const customUrls: string[] = [];
   let json = false;
+  let proxy = false;
   for (const arg of process.argv.slice(2)) {
     if (arg === "--json") json = true;
+    else if (arg === "--proxy") proxy = true;
     else if (arg.startsWith("--url=")) customUrls.push(arg.slice("--url=".length));
   }
-  return { customUrls, json };
+  return { customUrls, json, proxy };
 }
 
 async function main(): Promise<void> {
-  const { customUrls, json } = parseArgs();
+  const { customUrls, json, proxy } = parseArgs();
 
   const targets: SeedTarget[] =
     customUrls.length > 0
@@ -278,7 +292,13 @@ async function main(): Promise<void> {
         }))
       : DEFAULT_TARGETS;
 
-  const reports = await run(targets);
+  if (proxy && !process.env.BRIGHT_DATA_PROXY_URL) {
+    logger.warn(
+      "--proxy requested but BRIGHT_DATA_PROXY_URL is not set — falling back to direct fetch",
+    );
+  }
+
+  const reports = await run(targets, { proxy });
 
   if (json) {
     process.stdout.write(JSON.stringify(reports, null, 2) + "\n");
