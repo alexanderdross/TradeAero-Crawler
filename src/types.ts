@@ -167,6 +167,21 @@ export interface ParsedEvent {
 
   /** Organiser club / Verband name */
   organizerName: string;
+
+  /** Optional long-form description. Vereinsflieger has none — synthesized
+   *  in the parser. ICS sources carry the SUMMARY/DESCRIPTION pair. */
+  description?: string | null;
+  /** Optional canonical event URL (e.g. organiser's event page). Used for
+   *  the "More details" link on the detail page. */
+  eventUrl?: string | null;
+  /** Optional geographic coordinates. Crawlers that have them populate
+   *  here; rows without coords get geocoded by upsertEvent via Nominatim. */
+  latitude?: number | null;
+  longitude?: number | null;
+  /** ISO 639-1 source language. Drives the translator's source-side and
+   *  defaults to "de" for legacy compatibility (Vereinsflieger). ICS feeds
+   *  set "en" by default — calendars can override per source. */
+  sourceLocale?: string;
 }
 
 /** Result of a single crawl run */
