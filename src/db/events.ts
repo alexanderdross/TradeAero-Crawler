@@ -3,6 +3,8 @@ import { supabase } from "./client.js";
 import { verifyEventsDedupIndex } from "./events-startup-checks.js";
 import { getEventCategoryIdByCode } from "./categories.js";
 import { validateEvent } from "./event-validation.js";
+import { computeCanonicalKey } from "./event-canonical-key.js";
+import { compareSourcePriority } from "./event-source-priority.js";
 import { translateListing } from "../utils/translate.js";
 import { generateLocalizedSlugs } from "../utils/slug.js";
 import { sanitizeForDb } from "../utils/html.js";
@@ -139,6 +141,62 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertOutcome> {
   // crawler should set sourceLocale explicitly on the ParsedEvent.
   const sourceLocale = event.sourceLocale ?? "de";
 
+  // Cross-source dedup: collapse the same fly-in / airshow when it
+  // appears across an organiser feed AND a magazine reprint AND a
+  // forum repost. See EVENT_SOURCES_TIER2_AGGREGATORS.md §4.
+  //
+  // Skipped when the parser didn't supply enough anchoring data
+  // (no ICAO + no city + no venue) so we never collapse two genuinely
+  // distinct events under the same hash.
+  const canonicalKey = computeCanonicalKey(event);
+  if (canonicalKey) {
+    const { data: crossSourceRow, error: crossErr } = await supabase
+      .from("aviation_events")
+      .select("id, external_source")
+      .eq("canonical_key", canonicalKey)
+      .neq("external_source", event.sourceName)
+      .maybeSingle();
+    if (crossErr) {
+      logger.debug("canonical_key lookup failed (column may not exist yet)", {
+        sourceUrl: event.sourceUrl,
+        error: crossErr.message,
+      });
+    } else if (crossSourceRow) {
+      const cmp = compareSourcePriority(
+        event.sourceName,
+        crossSourceRow.external_source ?? "",
+      );
+      if (cmp === "lower" || cmp === "equal") {
+        logger.debug("Suppressing lower-priority cross-source duplicate", {
+          sourceName: event.sourceName,
+          sourceUrl: event.sourceUrl,
+          existingSource: crossSourceRow.external_source,
+          canonicalKey,
+        });
+        return { kind: "skipped", reason: "lower_priority_duplicate" };
+      }
+      // New source outranks existing → supersede the lower-priority row
+      // by deleting it. The fresh INSERT below then carries the same
+      // canonical_key as the canonical record going forward.
+      const { error: delErr } = await supabase
+        .from("aviation_events")
+        .delete()
+        .eq("id", crossSourceRow.id);
+      if (delErr) {
+        logger.warn("Failed to supersede lower-priority duplicate", {
+          existingId: crossSourceRow.id,
+          error: delErr.message,
+        });
+      } else {
+        logger.info("Superseded lower-priority cross-source duplicate", {
+          existingSource: crossSourceRow.external_source,
+          newSource: event.sourceName,
+          canonicalKey,
+        });
+      }
+    }
+  }
+
   // Look up existing row to decide insert vs update, and to reuse translations
   const { data: existing, error: selectError } = await supabase
     .from("aviation_events")
@@ -203,6 +261,7 @@ export async function upsertEvent(event: ParsedEvent): Promise<UpsertOutcome> {
     images: [],
     external_source: event.sourceName,
     source_url: event.sourceUrl,
+    canonical_key: canonicalKey,
     slug: baseSlug,
   };
 
