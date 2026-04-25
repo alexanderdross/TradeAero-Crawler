@@ -271,6 +271,25 @@ function zonedTimeToUtc(isoLocal: string, tz: string): number | null {
 }
 
 /**
+ * Detect whether a payload is a recognisable iCalendar document.
+ *
+ * Used at the parser entry point + by the crawler to short-circuit
+ * obvious non-iCal responses (host returns a 200 HTML "blocked"
+ * page, login redirect, sign-up wall, …) instead of silently
+ * producing 0 events. Cheap regex: BEGIN:VCALENDAR must be the
+ * first non-whitespace content. Tolerates a UTF-8 BOM and leading
+ * blank lines (some publishers add them) but rejects HTML payloads
+ * that happen to contain the marker mid-stream.
+ */
+export function looksLikeIcalendar(input: string): boolean {
+  if (typeof input !== "string" || input.length === 0) return false;
+  // Strip optional UTF-8 BOM, then require BEGIN:VCALENDAR at the
+  // very start (no `m` flag — `^` anchors to position 0 only).
+  const stripped = input.replace(/^﻿/, "").trimStart();
+  return /^BEGIN:VCALENDAR\b/i.test(stripped);
+}
+
+/**
  * Parse a full iCalendar payload into an array of single-occurrence
  * events. Multi-day events are returned as one row spanning DTSTART→DTEND
  * (we do not expand RRULEs).
@@ -284,11 +303,30 @@ export function parseIcs(input: string): IcsEvent[] {
         _durationMs?: number | null;
       })
     | null = null;
+  // Calendar-level fallback timezone. Many publishers (Google Calendar,
+  // Outlook, the EAA chapter platform) emit `X-WR-TIMEZONE:America/New_York`
+  // on the VCALENDAR and then leave individual VEVENT DTSTARTs as
+  // floating local times. Without picking up the calendar default, we'd
+  // mis-interpret those as Europe/Berlin and shift events by 6 hours.
+  let calendarTzid: string | null = null;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
     const prop = parseLine(line);
     if (!prop) continue;
+
+    // Capture VCALENDAR-level timezone hint. Must come BEFORE the first
+    // VEVENT in well-formed payloads, but we tolerate mid-stream in
+    // case a publisher emits it after BEGIN:VCALENDAR.
+    if (
+      !current &&
+      prop.name === "X-WR-TIMEZONE" &&
+      typeof prop.value === "string" &&
+      prop.value.trim().length > 0
+    ) {
+      calendarTzid = prop.value.trim();
+      continue;
+    }
 
     if (prop.name === "BEGIN" && prop.value.toUpperCase() === "VEVENT") {
       current = {};
@@ -350,7 +388,10 @@ export function parseIcs(input: string): IcsEvent[] {
           .filter(Boolean);
         break;
       case "DTSTART": {
-        const tzid = prop.params.TZID ?? null;
+        // Per-property TZID wins; calendar-level X-WR-TIMEZONE is
+        // the fallback for floating wall-clock values that have no
+        // TZID parameter (Google Calendar exports look like this).
+        const tzid = prop.params.TZID ?? calendarTzid;
         const iso = parseIcsDate(prop.value, tzid);
         if (iso) {
           current.startIso = iso;
@@ -365,7 +406,7 @@ export function parseIcs(input: string): IcsEvent[] {
         break;
       }
       case "DTEND": {
-        const tzid = prop.params.TZID ?? null;
+        const tzid = prop.params.TZID ?? calendarTzid;
         const iso = parseIcsDate(prop.value, tzid);
         if (iso) current.endIso = iso;
         break;
@@ -384,7 +425,7 @@ export function parseIcs(input: string): IcsEvent[] {
       case "EXDATE": {
         // EXDATE may carry one or more comma-separated values, each
         // with the same DATE / DATE-TIME formats DTSTART accepts.
-        const tzid = prop.params.TZID ?? null;
+        const tzid = prop.params.TZID ?? calendarTzid;
         const list = current.exdates ?? [];
         for (const part of prop.value.split(",")) {
           const iso = parseIcsDate(part, tzid);
@@ -396,7 +437,7 @@ export function parseIcs(input: string): IcsEvent[] {
       case "RDATE": {
         // Mirrors EXDATE: explicit additional occurrences. Less common
         // than EXDATE but RFC 5545 supports both.
-        const tzid = prop.params.TZID ?? null;
+        const tzid = prop.params.TZID ?? calendarTzid;
         const list = current.rdates ?? [];
         for (const part of prop.value.split(",")) {
           const iso = parseIcsDate(part, tzid);

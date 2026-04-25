@@ -130,6 +130,24 @@ export function parseVereinsfliegerPage(
   const sourceCategoryId = parseSourceCategoryId(pageUrl);
   const categoryCode = categoryCodeForSourceId(sourceCategoryId);
 
+  // Structural sanity check: the publiccalendar layout uses `pubcal_*`
+  // CSS classes on every event row. If the page contains zero of them,
+  // either the category genuinely has no events (also legitimate) OR
+  // vereinsflieger.de redesigned and our selectors no longer match. We
+  // distinguish by also checking for the table host: a redesigned page
+  // would still likely have a `<table>` but no `pubcal_title`. Emit a
+  // single WARN and let the caller produce []. The runEventCrawler's
+  // "0 events parsed" aggregate warning still fires per-source.
+  const titles = $(".pubcal_title").length;
+  if (titles === 0 && $("table").length > 0) {
+    logger.warn("Vereinsflieger page has tables but no .pubcal_title — possible structure change", {
+      pageUrl,
+      tables: $("table").length,
+      rows: $("tr").length,
+    });
+    return [];
+  }
+
   const events: ParsedEvent[] = [];
 
   $("tr").each((_, row) => {

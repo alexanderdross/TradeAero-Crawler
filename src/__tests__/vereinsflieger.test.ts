@@ -376,3 +376,27 @@ describe("synthesizeEventDescription", () => {
     expect(description).toBe("Unbekannt – Veranstalter: Verein");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Structural sanity guard — catches selector drift on a redesign.
+// ---------------------------------------------------------------------------
+describe("parseVereinsfliegerPage — structural sanity", () => {
+  it("returns [] without throwing when the page has tables but no .pubcal_title", () => {
+    // Simulates a redesigned page: still has the table host but the
+    // pubcal_* class names are gone.
+    const html = `
+      <table>
+        <tr><td>Termin</td><td>02.06.2026</td></tr>
+        <tr><td>Wo</td><td>EDDF</td></tr>
+      </table>
+    `;
+    const events = parseVereinsfliegerPage(html, PAGE_URL, SOURCE);
+    expect(events).toEqual([]);
+  });
+
+  it("returns [] for a genuinely empty page (no tables at all)", () => {
+    const html = `<div>No upcoming events</div>`;
+    const events = parseVereinsfliegerPage(html, PAGE_URL, SOURCE);
+    expect(events).toEqual([]);
+  });
+});

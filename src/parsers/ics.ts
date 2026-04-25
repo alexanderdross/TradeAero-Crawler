@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { parseIcs, expandRrule, type IcsEvent } from "../utils/ics.js";
+import {
+  parseIcs,
+  expandRrule,
+  looksLikeIcalendar,
+  type IcsEvent,
+} from "../utils/ics.js";
 import { cleanText } from "../utils/html.js";
 import { logger } from "../utils/logger.js";
 import type { ParsedEvent } from "../types.js";
@@ -90,6 +95,20 @@ export function parseIcsCalendar(
   calendar: IcsCalendar,
   sourceName: string,
 ): ParsedEvent[] {
+  // Sanity-check the payload BEFORE running the full parser. Some
+  // hosts return a 200 with an HTML error / login wall / sign-up
+  // gate when the ICS path is blocked or unauthorised; without this
+  // guard we'd silently produce 0 events. The crawler-level "0 events
+  // parsed" warning still fires for genuinely empty calendars.
+  if (!looksLikeIcalendar(icsText)) {
+    logger.warn("ICS payload doesn't start with BEGIN:VCALENDAR — feed may be blocked or returning HTML", {
+      calendar: calendar.name,
+      url: calendar.url,
+      preview: icsText.slice(0, 80),
+    });
+    return [];
+  }
+
   const horizon = new Date();
   horizon.setUTCDate(horizon.getUTCDate() + RRULE_HORIZON_DAYS);
 
