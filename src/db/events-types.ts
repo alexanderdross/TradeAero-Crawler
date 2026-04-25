@@ -17,7 +17,8 @@ import type { EventValidationReason } from "./event-validation.js";
 export type UpsertSkipReason =
   | EventValidationReason
   | "unchanged"
-  | "concurrent_insert";
+  | "concurrent_insert"
+  | "lower_priority_duplicate";
 
 export type UpsertOutcome =
   | { kind: "inserted" }

@@ -11,11 +11,17 @@ import type { UpsertSkipReason } from "../db/events-types.js";
 
 /** Skip reasons that signal expected pipeline behaviour rather than a
  *  data-quality issue worth surfacing in a warning. `unchanged` happens
- *  on every re-crawl of an already-seen row; `concurrent_insert`
- *  happens during overlapping runs. Everything else (validation drops)
- *  is interesting. */
+ *  on every re-crawl of an already-seen row; `concurrent_insert` happens
+ *  during overlapping runs; `lower_priority_duplicate` is the
+ *  cross-source dedup path correctly suppressing aggregator reprints
+ *  that the primary feed already covered. Everything else (validation
+ *  drops) is interesting. */
 export const NORMAL_SKIP_REASONS: ReadonlySet<UpsertSkipReason> =
-  new Set<UpsertSkipReason>(["unchanged", "concurrent_insert"]);
+  new Set<UpsertSkipReason>([
+    "unchanged",
+    "concurrent_insert",
+    "lower_priority_duplicate",
+  ]);
 
 /**
  * Build a one-line warning summarizing validation-class drops for the
