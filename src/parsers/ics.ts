@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseIcs, type IcsEvent } from "../utils/ics.js";
 import { cleanText } from "../utils/html.js";
+import { logger } from "../utils/logger.js";
 import type { ParsedEvent } from "../types.js";
 import type { IcsCalendar } from "../config.js";
 
@@ -87,8 +88,20 @@ export function parseIcsCalendar(
 ): ParsedEvent[] {
   const events = parseIcs(icsText);
   const out: ParsedEvent[] = [];
+  let droppedNoSummary = 0;
+  let droppedNoStart = 0;
   for (const ev of events) {
-    if (!ev.summary || !ev.startIso) continue;
+    // Drop rows missing required fields, but log enough context so a
+    // structurally-broken feed is visible in the run summary instead of
+    // silently producing a 0-event crawl.
+    if (!ev.summary) {
+      droppedNoSummary++;
+      continue;
+    }
+    if (!ev.startIso) {
+      droppedNoStart++;
+      continue;
+    }
 
     const { venue, city } = extractCity(ev.location);
     const { name: venueName, icao } = extractIcao(venue);
@@ -127,6 +140,15 @@ export function parseIcsCalendar(
       sourceLocale: calendar.sourceLocale ?? "en",
       latitude: null,
       longitude: null,
+    });
+  }
+  if (droppedNoSummary > 0 || droppedNoStart > 0) {
+    logger.warn("ICS parser dropped events with missing required fields", {
+      calendar: calendar.name,
+      url: calendar.url,
+      droppedNoSummary,
+      droppedNoStart,
+      kept: out.length,
     });
   }
   return out;
