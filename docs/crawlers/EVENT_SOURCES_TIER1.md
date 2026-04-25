@@ -3,6 +3,11 @@
 > **Status (2026-04-25):** Tracking doc. Companion to `VEREINSFLIEGER_CONCEPT.md`
 > and `ICS_FEED_CONCEPT.md`. Tier-2 aggregator/publisher sources are
 > tracked separately in `EVENT_SOURCES_TIER2_AGGREGATORS.md`.
+>
+> **First Tier-1 batch (2026-04-25):** DULV, AERO Friedrichshafen,
+> NBAA, and Eurocontrol shipped — see §2 status column. Remaining
+> seven (EAA chapters, AOPA chapters, FAI/CIVA, EBACE, BBR/DAeC,
+> French FFA, UK GASCo) still planned.
 
 ---
 
@@ -50,12 +55,12 @@ Approach legend:
 | 1 | EAA chapter calendars | US (≈900 chapters) | HYBRID — EAA chapters use a shared event-management platform with per-chapter ICS export. Bulk-collect ICS URLs from the chapter directory, then ingest via the generic ICS crawler. | https://www.eaa.org/eaa/eaa-chapters | Planned |
 | 2 | AOPA chapter calendars | US (≈90 regional + 50 university chapters) | HYBRID — AOPA Pilot Information Center publishes a national calendar and chapter-specific events. Investigate whether the chapter calendar is exposed as ICS; otherwise HTML scrape. | https://www.aopa.org/community/events | Planned |
 | 3 | FAI / CIVA | Aerobatics + airsports (worldwide) | HTML — FAI publishes the international competition calendar as structured HTML. CIVA runs the aerobatics sub-calendar. | https://www.fai.org/calendar https://www.fai.org/commission/civa | Planned |
-| 4 | NBAA | Business aviation (US-based, global events) | HTML — single curated event list at `nbaa.org/events`. Few high-value events per year (BACE, Schedulers & Dispatchers Conf, Leadership Conf). | https://nbaa.org/events/ | Planned |
-| 5 | EBACE | Business aviation (Europe, annual) | HTML — single annual fair (Geneva). Detail page provides date / venue / sessions; one-shot scrape per year is sufficient. | https://www.ebace.aero/ | Planned |
-| 6 | AERO Friedrichshafen | GA trade fair (Germany, annual) | HTML — single annual fair page. Static date / venue / sub-events; minimal scrape. | https://www.aero-expo.com/ | Planned |
-| 7 | Eurocontrol | Civil ATM / aviation policy events (Europe) | HTML — events index at `eurocontrol.int/events`. Modern CMS, structured listing. | https://www.eurocontrol.int/events | Planned |
+| 4 | NBAA | Business aviation (US-based, global events) | HTML — single curated event list at `nbaa.org/events`. Few high-value events per year (BACE, Schedulers & Dispatchers Conf, Leadership Conf). | https://nbaa.org/events/ | **Shipped** (2026-04-25; `useProxy: true` — Cloudflare-fronted) |
+| 5 | EBACE | Business aviation (Europe, annual) | HTML — single annual fair (Geneva). Detail page provides date / venue / sessions; one-shot scrape per year is sufficient. | https://www.ebace.aero/ | Deferred — EBACE26 cancelled by EBAA (2026-04). Re-evaluate when 2027 dates announce. |
+| 6 | AERO Friedrichshafen | GA trade fair (Germany, annual) | HTML — single annual fair page. Static date / venue / sub-events; minimal scrape. Crawls EN + DE locale homepages so per-locale subtitle/description copy is captured; canonical_key collapses both rows on the events page. | https://www.aero-expo.com/ + https://www.aero-expo.de/ | **Shipped** (2026-04-25) |
+| 7 | Eurocontrol | Civil ATM / aviation policy events (Europe) | HTML — events index at `eurocontrol.int/events`. Modern CMS, structured listing. Reads ISO timestamps from `<time datetime="…Z">` attrs — no string-parsing fragility. Paginated `?page=N` (0-indexed, ≤8 pages typical). | https://www.eurocontrol.int/events | **Shipped** (2026-04-25; `useProxy: true` — Cloudflare-fronted) |
 | 8 | BBR (Bundeskommission Segelflug) | Gliders (Germany) | HTML — DAeC's gliding commission publishes the German glider competition calendar. Page is server-rendered HTML. | https://www.daec.de/sportarten/segelflug/ | Planned |
-| 9 | DULV | Ultralights (Germany) | HTML — Deutscher Ultraleichtflugverband's events page lists fly-ins, training events, and member meetups. Cleanest German UL feed outside Vereinsflieger. | https://www.dulv.de/ | Planned |
+| 9 | DULV | Ultralights (Germany) | HTML — Deutscher Ultraleichtflugverband's events page lists fly-ins, training events, and member meetups. Cleanest German UL feed outside Vereinsflieger. Drupal site, paginated `?page=N` (0-indexed). | https://www.dulv.de/Veranstaltungen | **Shipped** (2026-04-25) |
 | 10 | French FFA | Pilot association (France) | HTML — Fédération Française Aéronautique publishes a national event calendar. Source language `fr` — bilingual-min translator covers EN automatically. | https://www.ff-aero.fr/ | Planned |
 | 11 | UK GASCo | General aviation safety (UK) | HTML — General Aviation Safety Council publishes a small calendar of safety evenings + AGM. Source language `en` — no translation work. | https://www.gasco.org.uk/ | Planned |
 

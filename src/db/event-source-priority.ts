@@ -22,6 +22,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PRIORITY: Record<string, number> = {
+  // ── 100: primary organisations (Tier-1) ───────────────────────────────────
+  // The org running the event — strongest authority.
+  "dulv.de": 100,
+  "aero-expo.com": 100,
+  "nbaa.org": 100,
+  "eurocontrol.int": 100,
+
   // ── 90: organiser-published feeds ─────────────────────────────────────────
   "vereinsflieger.de": 90,
   "ics-feed": 90,

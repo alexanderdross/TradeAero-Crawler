@@ -217,6 +217,69 @@ export const config = {
       useProxy: false,
       sendColdEmailInvite: false,
     },
+    /**
+     * Tier-1 primary org: Deutscher Ultraleichtflugverband (DULV) —
+     * cleanest German UL events feed outside Vereinsflieger. Drupal
+     * site, no anti-bot, paginated `?page=N` (0-indexed).
+     */
+    dulv: {
+      name: "dulv.de",
+      baseUrl: "https://www.dulv.de",
+      aircraft: [],
+      parts: [],
+      events: ["https://www.dulv.de/Veranstaltungen"],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-1 primary org: AERO Friedrichshafen — annual European GA
+     * trade fair. Single-page source listing one event per crawl. We
+     * crawl both the EN and DE locale homepages so the per-locale
+     * subtitle / description is captured; the cross-source dedup key
+     * collapses them on the events page.
+     */
+    aeroFriedrichshafen: {
+      name: "aero-expo.com",
+      baseUrl: "https://www.aero-expo.com",
+      aircraft: [],
+      parts: [],
+      events: [
+        "https://www.aero-expo.com/",
+        "https://www.aero-expo.de/",
+      ],
+      useProxy: false,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-1 primary org: NBAA (National Business Aviation Association,
+     * US). Curated /events/ page, single fetch, no pagination. Sits
+     * behind Cloudflare; cloud-IP requests can 503 — route through
+     * Bright Data residential.
+     */
+    nbaa: {
+      name: "nbaa.org",
+      baseUrl: "https://nbaa.org",
+      aircraft: [],
+      parts: [],
+      events: ["https://nbaa.org/events/"],
+      useProxy: true,
+      sendColdEmailInvite: false,
+    },
+    /**
+     * Tier-1 primary org: Eurocontrol (European ATM / aviation policy).
+     * Drupal CMS behind Cloudflare. Paginated `?page=N` (0-indexed,
+     * up to 8 pages typical). Bright Data proxy used defensively for
+     * Cloudflare-fronted GitHub-Actions runs.
+     */
+    eurocontrol: {
+      name: "eurocontrol.int",
+      baseUrl: "https://www.eurocontrol.int",
+      aircraft: [],
+      parts: [],
+      events: ["https://www.eurocontrol.int/events"],
+      useProxy: true,
+      sendColdEmailInvite: false,
+    },
   } satisfies Record<string, SourceConfig>,
   /** Default country for German sources */
   defaultCountry: "Germany",
