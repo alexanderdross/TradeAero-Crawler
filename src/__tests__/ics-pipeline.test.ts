@@ -3,6 +3,7 @@ import {
   parseIcs,
   expandRrule,
   normalizeIcsUrl,
+  parseIcsDuration,
   type IcsEvent,
 } from "../utils/ics.js";
 import { parseIcsCalendar } from "../parsers/ics.js";
@@ -174,6 +175,7 @@ function makeEvent(overrides: Partial<IcsEvent>): IcsEvent {
     rrule: null,
     isAllDay: false,
     exdates: [],
+    rdates: [],
     status: null,
     ...overrides,
   };
@@ -267,6 +269,233 @@ describe("expandRrule — EXDATE filtering", () => {
     const horizon = new Date("2027-01-01T00:00:00.000Z");
     const out = expandRrule(ev, horizon);
     expect(out.map((o) => o.startIso)).toEqual(["2026-06-08T09:00:00.000Z"]);
+  });
+});
+
+describe("parseIcsDuration", () => {
+  it("parses PT1H to 3_600_000 ms", () => {
+    expect(parseIcsDuration("PT1H")).toBe(3_600_000);
+  });
+
+  it("parses PT30M to 1_800_000 ms", () => {
+    expect(parseIcsDuration("PT30M")).toBe(1_800_000);
+  });
+
+  it("parses P1D to 86_400_000 ms", () => {
+    expect(parseIcsDuration("P1D")).toBe(86_400_000);
+  });
+
+  it("parses P1W to 604_800_000 ms", () => {
+    expect(parseIcsDuration("P1W")).toBe(604_800_000);
+  });
+
+  it("parses composite P1DT12H", () => {
+    expect(parseIcsDuration("P1DT12H")).toBe(86_400_000 + 12 * 3_600_000);
+  });
+
+  it("parses composite PT1H30M", () => {
+    expect(parseIcsDuration("PT1H30M")).toBe(3_600_000 + 30 * 60_000);
+  });
+
+  it("returns null for empty/invalid input", () => {
+    expect(parseIcsDuration("")).toBeNull();
+    expect(parseIcsDuration("P")).toBeNull();
+    expect(parseIcsDuration("garbage")).toBeNull();
+  });
+
+  it("supports negative duration", () => {
+    expect(parseIcsDuration("-PT15M")).toBe(-15 * 60_000);
+  });
+});
+
+describe("parseIcs — DURATION fallback for endIso", () => {
+  it("derives endIso from DTSTART + DURATION when DTEND is missing", () => {
+    const ics = vevent(
+      [
+        "UID:1",
+        "SUMMARY:Briefing",
+        "DTSTART:20260601T090000Z",
+        "DURATION:PT45M",
+      ].join("\r\n"),
+    );
+    const ev = parseIcs(ics)[0];
+    expect(ev.startIso).toBe("2026-06-01T09:00:00.000Z");
+    expect(ev.endIso).toBe("2026-06-01T09:45:00.000Z");
+  });
+
+  it("prefers DTEND when both DTEND and DURATION are present", () => {
+    const ics = vevent(
+      [
+        "UID:1",
+        "SUMMARY:Briefing",
+        "DTSTART:20260601T090000Z",
+        "DTEND:20260601T100000Z",
+        "DURATION:PT30M",
+      ].join("\r\n"),
+    );
+    const ev = parseIcs(ics)[0];
+    expect(ev.endIso).toBe("2026-06-01T10:00:00.000Z");
+  });
+
+  it("falls back to startIso when neither DTEND nor DURATION is present", () => {
+    const ics = vevent(
+      ["UID:1", "SUMMARY:Briefing", "DTSTART:20260601T090000Z"].join("\r\n"),
+    );
+    const ev = parseIcs(ics)[0];
+    expect(ev.endIso).toBe(ev.startIso);
+  });
+});
+
+describe("parseIcs — RDATE", () => {
+  it("captures RDATE entries (single + comma-separated)", () => {
+    const ics = vevent(
+      [
+        "UID:1",
+        "SUMMARY:Test",
+        "DTSTART:20260601T090000Z",
+        "RDATE:20260615T090000Z",
+        "RDATE:20260622T090000Z,20260629T090000Z",
+      ].join("\r\n"),
+    );
+    const ev = parseIcs(ics)[0];
+    expect(ev.rdates).toHaveLength(3);
+    expect(ev.rdates).toContain("2026-06-15T09:00:00.000Z");
+  });
+});
+
+describe("expandRrule — RDATE merging", () => {
+  it("appends RDATE entries to a non-recurring event", () => {
+    const ev = makeEvent({
+      startIso: "2026-06-01T09:00:00.000Z",
+      endIso: "2026-06-01T10:00:00.000Z",
+      rrule: null,
+      rdates: ["2026-06-15T09:00:00.000Z", "2026-07-01T09:00:00.000Z"],
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    expect(out.map((o) => o.startIso)).toEqual([
+      "2026-06-01T09:00:00.000Z",
+      "2026-06-15T09:00:00.000Z",
+      "2026-07-01T09:00:00.000Z",
+    ]);
+  });
+
+  it("merges RDATE on top of an RRULE expansion (chronological)", () => {
+    const ev = makeEvent({
+      startIso: "2026-06-01T09:00:00.000Z",
+      endIso: "2026-06-01T10:00:00.000Z",
+      rrule: "FREQ=WEEKLY;COUNT=3",
+      rdates: ["2026-06-04T09:00:00.000Z"],
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    expect(out.map((o) => o.startIso)).toEqual([
+      "2026-06-01T09:00:00.000Z",
+      "2026-06-04T09:00:00.000Z",
+      "2026-06-08T09:00:00.000Z",
+      "2026-06-15T09:00:00.000Z",
+    ]);
+  });
+
+  it("filters RDATE through EXDATE", () => {
+    const ev = makeEvent({
+      startIso: "2026-06-01T09:00:00.000Z",
+      endIso: "2026-06-01T10:00:00.000Z",
+      rrule: null,
+      rdates: ["2026-06-15T09:00:00.000Z", "2026-06-22T09:00:00.000Z"],
+      exdates: ["2026-06-15T09:00:00.000Z"],
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    expect(out.map((o) => o.startIso)).toEqual([
+      "2026-06-01T09:00:00.000Z",
+      "2026-06-22T09:00:00.000Z",
+    ]);
+  });
+
+  it("does not duplicate when RDATE matches an RRULE-derived occurrence", () => {
+    const ev = makeEvent({
+      startIso: "2026-06-01T09:00:00.000Z",
+      endIso: "2026-06-01T10:00:00.000Z",
+      rrule: "FREQ=WEEKLY;COUNT=2",
+      rdates: ["2026-06-08T09:00:00.000Z"],
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    expect(out.map((o) => o.startIso)).toEqual([
+      "2026-06-01T09:00:00.000Z",
+      "2026-06-08T09:00:00.000Z",
+    ]);
+  });
+});
+
+describe("expandRrule — positional BYDAY (FREQ=MONTHLY)", () => {
+  it("emits the 2nd Tuesday of every month", () => {
+    const ev = makeEvent({
+      startIso: "2026-01-01T19:00:00.000Z",
+      endIso: "2026-01-01T20:00:00.000Z",
+      rrule: "FREQ=MONTHLY;BYDAY=2TU;COUNT=4",
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    // Base (Jan 1, Thu) + 2nd Tuesdays: Jan 13, Feb 10, Mar 10.
+    // RFC 5545 — DTSTART always counts as the first occurrence even
+    // when it doesn't match BYDAY; COUNT=4 → base + 3 rule hits.
+    expect(out.map((o) => o.startIso)).toEqual([
+      "2026-01-01T19:00:00.000Z",
+      "2026-01-13T19:00:00.000Z",
+      "2026-02-10T19:00:00.000Z",
+      "2026-03-10T19:00:00.000Z",
+    ]);
+  });
+
+  it("emits the last Friday of every month", () => {
+    const ev = makeEvent({
+      startIso: "2026-01-01T18:00:00.000Z",
+      endIso: "2026-01-01T19:00:00.000Z",
+      rrule: "FREQ=MONTHLY;BYDAY=-1FR;COUNT=4",
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    // Base + last-Friday hits: Jan 30, Feb 27, Mar 27.
+    expect(out.map((o) => o.startIso)).toEqual([
+      "2026-01-01T18:00:00.000Z",
+      "2026-01-30T18:00:00.000Z",
+      "2026-02-27T18:00:00.000Z",
+      "2026-03-27T18:00:00.000Z",
+    ]);
+  });
+
+  it("emits every Wednesday in the month for unprefixed BYDAY", () => {
+    const ev = makeEvent({
+      startIso: "2026-01-01T19:00:00.000Z",
+      endIso: "2026-01-01T20:00:00.000Z",
+      rrule: "FREQ=MONTHLY;BYDAY=WE;COUNT=5",
+    });
+    const horizon = new Date("2027-01-01T00:00:00.000Z");
+    const out = expandRrule(ev, horizon);
+    // All Wednesdays in Jan 2026: 7, 14, 21, 28. Then start of Feb (4).
+    expect(out.map((o) => o.startIso).slice(0, 5)).toEqual([
+      "2026-01-01T19:00:00.000Z",
+      "2026-01-07T19:00:00.000Z",
+      "2026-01-14T19:00:00.000Z",
+      "2026-01-21T19:00:00.000Z",
+      "2026-01-28T19:00:00.000Z",
+    ]);
+  });
+
+  it("returns no extra occurrences when BYDAY=5SU and the month has no 5th Sunday", () => {
+    const ev = makeEvent({
+      startIso: "2026-02-01T19:00:00.000Z",
+      endIso: "2026-02-01T20:00:00.000Z",
+      rrule: "FREQ=MONTHLY;BYDAY=5SU;COUNT=2",
+    });
+    // Horizon clamped to end of February so March doesn't bleed in.
+    const horizon = new Date("2026-02-28T23:59:59.000Z");
+    const out = expandRrule(ev, horizon);
+    // Feb 2026 Sundays are 1, 8, 15, 22 — only 4. BYDAY=5SU yields no
+    // matches in the month, so only the base survives.
+    expect(out.map((o) => o.startIso)).toEqual(["2026-02-01T19:00:00.000Z"]);
   });
 });
 

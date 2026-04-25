@@ -102,7 +102,7 @@ export function parseIcsCalendar(
   const events: IcsEvent[] = [];
   let expandedRecurrences = 0;
   for (const ev of baseEvents) {
-    if (ev.rrule) {
+    if (ev.rrule || ev.rdates.length > 0) {
       const occurrences = expandRrule(ev, horizon);
       events.push(...occurrences);
       if (occurrences.length > 1) expandedRecurrences += occurrences.length - 1;
