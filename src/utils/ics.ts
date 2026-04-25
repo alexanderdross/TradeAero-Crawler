@@ -56,6 +56,33 @@ export interface IcsEvent {
    *  Captured for the bounded expander in `expandRrule()`; null when
    *  the event isn't recurring. */
   rrule: string | null;
+  /** True when DTSTART is `VALUE=DATE` (date-only, no time-of-day).
+   *  Lets the dedup key collapse all-day↔timed format flips so a feed
+   *  that re-issues the same event in either form doesn't double-write. */
+  isAllDay: boolean;
+  /** ISO 8601 UTC strings of dates excluded from the recurrence (RFC
+   *  5545 §3.8.5.1 EXDATE). The expander drops occurrences whose start
+   *  matches any entry. Empty for non-recurring events. */
+  exdates: string[];
+  /** `STATUS:` value (CONFIRMED / CANCELLED / TENTATIVE). null when
+   *  absent. The parser drops `CANCELLED` rows in `parseIcsCalendar`. */
+  status: "CONFIRMED" | "CANCELLED" | "TENTATIVE" | null;
+}
+
+/**
+ * Rewrite `webcal://` and `webcals://` URL schemes to `https://`.
+ *
+ * `webcal://` is a calendar-subscription URL hint introduced by Apple
+ * iCal (and adopted by Google / Microsoft); the actual transport is
+ * plain HTTPS. Many event-page anchors use it so users get an
+ * "Add to calendar" prompt. Our crawler fetches the same payload over
+ * HTTPS — normalising at the edge means a config entry can copy-paste
+ * the user-facing URL verbatim.
+ *
+ * Non-webcal URLs are returned unchanged.
+ */
+export function normalizeIcsUrl(url: string): string {
+  return url.replace(/^webcals?:\/\//i, "https://");
 }
 
 /**
@@ -234,6 +261,9 @@ export function parseIcs(input: string): IcsEvent[] {
           url: current.url ?? null,
           categories: current.categories ?? [],
           rrule: current.rrule ?? null,
+          isAllDay: current.isAllDay ?? false,
+          exdates: current.exdates ?? [],
+          status: current.status ?? null,
         });
       }
       current = null;
@@ -269,6 +299,12 @@ export function parseIcs(input: string): IcsEvent[] {
         if (iso) {
           current.startIso = iso;
           current._dtstartTz = tzid;
+          // VALUE=DATE → all-day event (date-only DTSTART). The regex
+          // fallback covers feeds that omit the parameter but emit a
+          // bare YYYYMMDD value (Google export does this).
+          current.isAllDay =
+            prop.params.VALUE?.toUpperCase() === "DATE" ||
+            /^\d{8}$/.test(prop.value.trim());
         }
         break;
       }
@@ -281,6 +317,25 @@ export function parseIcs(input: string): IcsEvent[] {
       case "RRULE":
         current.rrule = prop.value;
         break;
+      case "EXDATE": {
+        // EXDATE may carry one or more comma-separated values, each
+        // with the same DATE / DATE-TIME formats DTSTART accepts.
+        const tzid = prop.params.TZID ?? null;
+        const list = current.exdates ?? [];
+        for (const part of prop.value.split(",")) {
+          const iso = parseIcsDate(part, tzid);
+          if (iso) list.push(iso);
+        }
+        current.exdates = list;
+        break;
+      }
+      case "STATUS": {
+        const s = prop.value.trim().toUpperCase();
+        if (s === "CONFIRMED" || s === "CANCELLED" || s === "TENTATIVE") {
+          current.status = s;
+        }
+        break;
+      }
     }
   }
   return events;
@@ -308,6 +363,7 @@ interface RruleParts {
   count: number | null;
   until: Date | null;
   byday: string[]; // e.g. ["MO","WE","FR"]
+  bymonthday: number[]; // e.g. [1, 15] for "1st and 15th of every month"
 }
 
 function parseRruleString(rrule: string): RruleParts {
@@ -317,6 +373,7 @@ function parseRruleString(rrule: string): RruleParts {
     count: null,
     until: null,
     byday: [],
+    bymonthday: [],
   };
   for (const piece of rrule.split(";")) {
     const eq = piece.indexOf("=");
@@ -353,6 +410,12 @@ function parseRruleString(rrule: string): RruleParts {
           .split(",")
           .map((d) => d.trim().toUpperCase())
           .filter((d) => /^(MO|TU|WE|TH|FR|SA|SU)$/.test(d));
+        break;
+      case "BYMONTHDAY":
+        parts.bymonthday = value
+          .split(",")
+          .map((d) => parseInt(d.trim(), 10))
+          .filter((n) => Number.isFinite(n) && n >= 1 && n <= 31);
         break;
     }
   }
@@ -397,8 +460,39 @@ export function expandRrule(
   if (!Number.isFinite(start.getTime())) return base;
   const durationMs = Math.max(0, end.getTime() - start.getTime());
 
-  const out: IcsEvent[] = [event];
+  // EXDATE list as a Set of ISO strings for O(1) membership checks.
+  const excluded = new Set(event.exdates);
+  const isExcluded = (iso: string): boolean => excluded.has(iso);
+
+  // Base occurrence is always emitted unless explicitly excluded.
+  const out: IcsEvent[] = isExcluded(event.startIso) ? [] : [event];
   const stopAt = rule.until && rule.until < horizon ? rule.until : horizon;
+
+  // RFC 5545 COUNT counts raw rule occurrences (including ones EXDATE
+  // strips out); the published recurrence size is therefore COUNT
+  // minus the matching EXDATEs. Track raw count separately from the
+  // emitted-rows count so the budget is respected regardless of how
+  // many EXDATEs land inside the window. The base counts as raw=1.
+  let rawCount = 1;
+
+  /** Push an occurrence unless it's listed in EXDATE; always
+   *  increments the rawCount budget. Returns true when the loop
+   *  should stop (COUNT hit, maxOccurrences hit, or out-of-horizon
+   *  needs handling by the caller). */
+  const emit = (occurrence: Date): boolean => {
+    rawCount++;
+    const startIso = occurrence.toISOString();
+    if (!isExcluded(startIso)) {
+      out.push({
+        ...event,
+        startIso,
+        endIso: new Date(occurrence.getTime() + durationMs).toISOString(),
+      });
+      if (out.length >= maxOccurrences) return true;
+    }
+    if (rule.count && rawCount >= rule.count) return true;
+    return false;
+  };
 
   if (rule.freq === "WEEKLY" && rule.byday.length > 0) {
     // Iterate week-by-week, emit each requested weekday.
@@ -422,13 +516,7 @@ export function expandRrule(
         );
         if (occurrence <= start) continue;
         if (occurrence > stopAt) return out;
-        out.push({
-          ...event,
-          startIso: occurrence.toISOString(),
-          endIso: new Date(occurrence.getTime() + durationMs).toISOString(),
-        });
-        if (out.length >= maxOccurrences) return out;
-        if (rule.count && out.length >= rule.count) return out;
+        if (emit(occurrence)) return out;
       }
       weekStart = new Date(weekStart);
       weekStart.setUTCDate(weekStart.getUTCDate() + 7 * rule.interval);
@@ -436,8 +524,40 @@ export function expandRrule(
     return out;
   }
 
-  // Generic FREQ=DAILY/WEEKLY/MONTHLY without BYDAY: step from the
-  // start date by `interval` units of the chosen frequency.
+  if (rule.freq === "MONTHLY" && rule.bymonthday.length > 0) {
+    // FREQ=MONTHLY;BYMONTHDAY=15 → every month on the 15th. Common for
+    // EAA/AOPA chapter monthly meetings. Iterate month-by-month from the
+    // start, emit every day in BYMONTHDAY that lands within stopAt.
+    const sortedDays = [...rule.bymonthday].sort((a, b) => a - b);
+    let monthCursor = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1),
+    );
+    while (out.length < maxOccurrences) {
+      for (const day of sortedDays) {
+        const occurrence = new Date(
+          Date.UTC(
+            monthCursor.getUTCFullYear(),
+            monthCursor.getUTCMonth(),
+            day,
+            start.getUTCHours(),
+            start.getUTCMinutes(),
+            start.getUTCSeconds(),
+          ),
+        );
+        // Skip days that don't exist in this month (e.g. day=31 in Feb)
+        if (occurrence.getUTCMonth() !== monthCursor.getUTCMonth()) continue;
+        if (occurrence <= start) continue;
+        if (occurrence > stopAt) return out;
+        if (emit(occurrence)) return out;
+      }
+      monthCursor = new Date(monthCursor);
+      monthCursor.setUTCMonth(monthCursor.getUTCMonth() + rule.interval);
+    }
+    return out;
+  }
+
+  // Generic FREQ=DAILY/WEEKLY/MONTHLY without BYDAY/BYMONTHDAY: step
+  // from the start date by `interval` units of the chosen frequency.
   let next = new Date(start);
   while (out.length < maxOccurrences) {
     if (rule.freq === "DAILY") {
@@ -452,12 +572,7 @@ export function expandRrule(
       next.setUTCMonth(next.getUTCMonth() + rule.interval);
     }
     if (next > stopAt) return out;
-    out.push({
-      ...event,
-      startIso: next.toISOString(),
-      endIso: new Date(next.getTime() + durationMs).toISOString(),
-    });
-    if (rule.count && out.length >= rule.count) return out;
+    if (emit(next)) return out;
   }
   return out;
 }

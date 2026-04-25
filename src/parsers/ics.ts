@@ -121,16 +121,16 @@ export function parseIcsCalendar(
   const out: ParsedEvent[] = [];
   let droppedNoSummary = 0;
   let droppedNoStart = 0;
+  let droppedCancelled = 0;
   for (const ev of events) {
     // Drop rows missing required fields, but log enough context so a
     // structurally-broken feed is visible in the run summary instead of
     // silently producing a 0-event crawl.
     //
     // UID-less events are intentionally **kept**: our dedup key is
-    // sha1(title|startIso|organiser), synthesised in
-    // `parseIcsCalendar` below — we never read `ev.uid`. Many smaller
-    // calendar exporters omit UID, and rejecting them would drop
-    // legitimate events for no benefit.
+    // sha1(title|startDay|organiser), synthesised below — we never
+    // read `ev.uid`. Many smaller calendar exporters omit UID, and
+    // rejecting them would drop legitimate events for no benefit.
     if (!ev.summary) {
       droppedNoSummary++;
       continue;
@@ -139,16 +139,31 @@ export function parseIcsCalendar(
       droppedNoStart++;
       continue;
     }
+    // RFC 5545 §3.8.1.11 STATUS=CANCELLED — feed publishers leave the
+    // VEVENT in the payload (so subscribers reconcile it) but expect
+    // consumers to filter. Drop without warning.
+    if (ev.status === "CANCELLED") {
+      droppedCancelled++;
+      continue;
+    }
 
     const { venue, city } = extractCity(ev.location);
     const { name: venueName, icao } = extractIcao(venue);
 
     const categoryCode = pickCategoryCode(ev, calendar.defaultCategory);
 
-    // Stable dedup key: same construction as Vereinsflieger so the same
-    // partial UNIQUE INDEX serves both sources.
+    // Stable dedup key: hash on the calendar-day component of startIso
+    // rather than the full instant. A feed that flips the same event
+    // between VALUE=DATE (all-day) and a timed VALUE=DATE-TIME would
+    // otherwise produce two rows because the seconds-precision string
+    // differs ("2026-04-25T00:00:00.000Z" vs "2026-04-25T18:00:00.000Z").
+    // Day-precision still gives every recurring expansion its own hash
+    // because expanded occurrences land on different days. Same
+    // construction style as Vereinsflieger; both sources can share the
+    // partial UNIQUE INDEX.
+    const startDay = ev.startIso.slice(0, 10);
     const sourceIdHash = sha1Short(
-      `${ev.summary}|${ev.startIso}|${calendar.organiserName ?? calendar.name}`,
+      `${ev.summary}|${startDay}|${calendar.organiserName ?? calendar.name}`,
     );
     const sourceUrl = `${calendar.url}#${sourceIdHash}`;
 
@@ -179,12 +194,13 @@ export function parseIcsCalendar(
       longitude: null,
     });
   }
-  if (droppedNoSummary > 0 || droppedNoStart > 0) {
-    logger.warn("ICS parser dropped events with missing required fields", {
+  if (droppedNoSummary > 0 || droppedNoStart > 0 || droppedCancelled > 0) {
+    logger.warn("ICS parser dropped events", {
       calendar: calendar.name,
       url: calendar.url,
       droppedNoSummary,
       droppedNoStart,
+      droppedCancelled,
       kept: out.length,
     });
   }
